@@ -1,8 +1,8 @@
 """
-Custom integration to integrate integration_blueprint with Home Assistant.
+Custom integration to integrate Contact Energy Monitor to Home Assistant via HACS.
 
 For more details about this integration, please refer to
-https://github.com/ludeeus/integration_blueprint
+https://github.com/Leftaf/hacs-contact-energy
 """
 
 from __future__ import annotations

@@ -1,0 +1,15 @@
+{
+  "domain": "nz_contact_energy",
+  "name": "Contact Energy",
+  "codeowners": [
+    "@Leftaf"
+  ],
+  "dependencies": [
+		"recorder"
+	],
+  "config_flow": true,
+  "documentation": "https://github.com/Leftaf/hacs-contact-energy/",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Leftaf/hacs-contact-energy/issues",
+  "version": "0.1.0"
+}

@@ -2,53 +2,47 @@
 
 from datetime import datetime, timedelta
 import logging
-import voluptuous as vol
 
-import homeassistant.helpers.config_validation as cv
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, UnitOfEnergy
-
-from homeassistant.components.recorder.models import ( 
-    StatisticData, 
-    StatisticMetaData, 
+from homeassistant.components.recorder.models import (
+    StatisticData,
     StatisticMeanType,
+    StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
 )
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, UnitOfEnergy
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import ContactEnergyApi
 from .const import (
+    CONF_REFRESH_INTERVAL,
+    CONF_USAGE_DAYS,
+    DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_USAGE_DAYS,
     DOMAIN,
     SENSOR_USAGE_NAME,
-    CONF_USAGE_DAYS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_EMAIL): cv.string,
-        vol.Required(CONF_PASSWORD): cv.string,
-        vol.Optional(CONF_USAGE_DAYS, default=10): cv.positive_int,
-    }
-)
 
-SCAN_INTERVAL = timedelta(hours=3)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Contact Energy sensor from a config entry."""
+    config = entry.data
+    api = ContactEnergyApi(config[CONF_EMAIL], config[CONF_PASSWORD])
+    usage_days = config.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS)
+    refresh_hours = config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
 
-
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    """Set up the platform async."""
-    email = config.get(CONF_EMAIL)
-    password = config.get(CONF_PASSWORD)
-    usage_days = config.get(CONF_USAGE_DAYS)
-
-    api = ContactEnergyApi(email, password)
-
-    _LOGGER.debug("Setting up sensor(s)...")
-
-    # Set update_before_add=False to prevent startup blocking
-    async_add_entities([ContactEnergyUsageSensor(SENSOR_USAGE_NAME, api, usage_days)], False)
+    sensor = ContactEnergyUsageSensor(SENSOR_USAGE_NAME, api, usage_days, refresh_hours)
+    async_add_entities([sensor], False)
 
 
 class ContactEnergyUsageSensor(SensorEntity):
@@ -61,16 +55,21 @@ class ContactEnergyUsageSensor(SensorEntity):
     _attr_device_class = "energy"
     _attr_state_class = "total"
 
-    def __init__(self, name, api, usage_days):
+    def __init__(self, name: str, api: ContactEnergyApi, usage_days: int, refresh_hours: int):
         """Initialise the sensor."""
         self._attr_name = name
         self._usage_days = usage_days
         self._api = api
+        self._scan_interval = timedelta(hours=refresh_hours)
+
+    @property
+    def scan_interval(self) -> timedelta:
+        """Dynamic polling interval set via config UI."""
+        return self._scan_interval
 
     def _fetch_data_and_process(self):
         """Synchronous wrapper for blocking API calls."""
         if not self._api._api_token:
-            _LOGGER.info("Haven't logged in yet, logging in now...")
             if not self._api.login():
                 _LOGGER.error("Failed to login - check credentials")
                 return None, None
@@ -78,17 +77,17 @@ class ContactEnergyUsageSensor(SensorEntity):
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         kWhStatistics = []
         freeKWhStatistics = []
-        kWhRunningSum = 0
-        freeKWhRunningSum = 0
+        kWhRunningSum = 0.0
+        freeKWhRunningSum = 0.0
 
         for i in range(self._usage_days):
             previous_day = today - timedelta(days=self._usage_days - i)
             response = self._api.get_usage(
-                str(previous_day.year), str(previous_day.month), str(previous_day.day)
+                str(previous_day.year), f"{previous_day.month:02d}", f"{previous_day.day:02d}"
             )
-            if response and response[0]:
+            if response and isinstance(response, list):
                 for point in response:
-                    if point.get("value"):
+                    if isinstance(point, dict) and point.get("value"):
                         if point.get("offpeakValue") == "0.00":
                             kWhRunningSum += float(point["value"])
                         else:
@@ -102,14 +101,11 @@ class ContactEnergyUsageSensor(SensorEntity):
 
     async def async_update(self):
         """Begin usage update asynchronously."""
-        _LOGGER.debug("Beginning usage update")
-
-        # Offload blocking network calls to executor pool
         kWhStatistics, freeKWhStatistics = await self.hass.async_add_executor_job(
             self._fetch_data_and_process
         )
 
-        if kWhStatistics is None:
+        if not kWhStatistics:
             return
 
         kWhMetadata = StatisticMetaData(

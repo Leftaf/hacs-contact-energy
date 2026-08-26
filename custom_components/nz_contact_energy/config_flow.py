@@ -1,26 +1,26 @@
-"""Adds config flow for Blueprint."""
+"""Adds config flow for Contact Energy."""
 
 from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.loader import async_get_loaded_integration
-from slugify import slugify
 
-from .api import (
-    IntegrationBlueprintApiClient,
-    IntegrationBlueprintApiClientAuthenticationError,
-    IntegrationBlueprintApiClientCommunicationError,
-    IntegrationBlueprintApiClientError,
+from .api import ContactEnergyApi
+from .const import (
+    CONF_ACCOUNT_ID,
+    CONF_REFRESH_INTERVAL,
+    CONF_USAGE_DAYS,
+    DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_USAGE_DAYS,
+    DOMAIN,
+    LOGGER,
 )
-from .const import DOMAIN, LOGGER
 
 
-class BlueprintFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow for Blueprint."""
+class ContactEnergyFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
+    """Config flow for Contact Energy."""
 
     VERSION = 1
 
@@ -31,68 +31,42 @@ class BlueprintFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle a flow initialized by the user."""
         _errors = {}
         if user_input is not None:
-            try:
-                await self._test_credentials(
-                    username=user_input[CONF_USERNAME],
-                    password=user_input[CONF_PASSWORD],
-                )
-            except IntegrationBlueprintApiClientAuthenticationError as exception:
-                LOGGER.warning(exception)
-                _errors["base"] = "auth"
-            except IntegrationBlueprintApiClientCommunicationError as exception:
-                LOGGER.error(exception)
-                _errors["base"] = "connection"
-            except IntegrationBlueprintApiClientError as exception:
-                LOGGER.exception(exception)
-                _errors["base"] = "unknown"
-            else:
-                await self.async_set_unique_id(
-                    ## Do NOT use this in production code
-                    ## The unique_id should never be something that can change
-                    ## https://developers.home-assistant.io/docs/config_entries_config_flow_handler#unique-ids
-                    unique_id=slugify(user_input[CONF_USERNAME])
-                )
+            # Validate credentials against the API in executor pool
+            api = ContactEnergyApi(
+                user_input[CONF_EMAIL], 
+                user_input[CONF_PASSWORD]
+            )
+            success = await self.hass.async_add_executor_job(api.login)
+
+            if success:
+                await self.async_set_unique_id(user_input[CONF_EMAIL].lower())
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=user_input[CONF_USERNAME],
+                    title=user_input[CONF_EMAIL],
                     data=user_input,
                 )
-
-        integration = async_get_loaded_integration(self.hass, DOMAIN)
-        assert integration.documentation is not None, (  # noqa: S101
-            "Integration documentation URL is not set in manifest.json"
-        )
+            _errors["base"] = "invalid_auth"
 
         return self.async_show_form(
             step_id="user",
-            description_placeholders={
-                "documentation_url": integration.documentation,
-            },
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_USERNAME,
-                        default=(user_input or {}).get(CONF_USERNAME, vol.UNDEFINED),
-                    ): selector.TextSelector(
-                        selector.TextSelectorConfig(
-                            type=selector.TextSelectorType.TEXT,
-                        ),
+                    vol.Required(CONF_EMAIL): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
                     ),
                     vol.Required(CONF_PASSWORD): selector.TextSelector(
-                        selector.TextSelectorConfig(
-                            type=selector.TextSelectorType.PASSWORD,
-                        ),
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
                     ),
-                },
+                    vol.Optional(CONF_ACCOUNT_ID, default=""): selector.TextSelector(
+                        selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+                    ),
+                    vol.Optional(CONF_USAGE_DAYS, default=DEFAULT_USAGE_DAYS): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=1, max=30, mode=selector.NumberSelectorMode.BOX)
+                    ),
+                    vol.Optional(CONF_REFRESH_INTERVAL, default=DEFAULT_REFRESH_INTERVAL): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=1, max=168, mode=selector.NumberSelectorMode.BOX)
+                    ),
+                }
             ),
             errors=_errors,
         )
-
-    async def _test_credentials(self, username: str, password: str) -> None:
-        """Validate credentials."""
-        client = IntegrationBlueprintApiClient(
-            username=username,
-            password=password,
-            session=async_get_clientsession(self.hass),
-        )
-        await client.async_get_data()

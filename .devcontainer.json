@@ -1,5 +1,5 @@
 {
-    "name": "ludeeus/nz_contact_energy",
+    "name": "leftaf/nz_contact_energy",
     "image": "mcr.microsoft.com/devcontainers/base:debian",
     "postCreateCommand": "scripts/setup",
     "forwardPorts": [

@@ -2,20 +2,22 @@
     "config": {
         "step": {
             "user": {
-                "description": "If you need help with the configuration have a look here: {documentation_url}",
+                "title": "Connect to Contact Energy",
+                "description": "Enter your Contact Energy account credentials and preferences.",
                 "data": {
-                    "username": "Username",
-                    "password": "Password"
+                    "account_id": "Account ID",
+                    "password": "Password",
+                    "default_usage_days": "Default Usage Days (History)",
+                    "default_refresh_interval": "Default Refresh Interval (hours)"
                 }
             }
         },
         "error": {
-            "auth": "Username/Password is wrong.",
-            "connection": "Unable to connect to the server.",
-            "unknown": "Unknown error occurred."
+            "invalid_auth": "Invalid account ID or password.",
+            "cannot_connect": "Failed to connect to Contact Energy services. Please try again later."
         },
         "abort": {
-            "already_configured": "This entry is already configured."
+            "already_configured": "This account is already configured."
         }
     }
 }

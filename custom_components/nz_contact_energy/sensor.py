@@ -1,24 +1,29 @@
-"""Contact Energy sensors."""
+"""NZ Contact Energy sensors."""
 
-from datetime import datetime, timedelta
+from __future__ import annotations
+
 import logging
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from homeassistant.components.recorder.models import (
     StatisticData,
-    StatisticMeanType,
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
 )
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, UnitOfEnergy
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import CONF_PASSWORD, UnitOfEnergy
+from homeassistant.util import dt as dt_util
 
 from .api import ContactEnergyApi
 from .const import (
+    CONF_ACCOUNT_ID,
     CONF_REFRESH_INTERVAL,
     CONF_USAGE_DAYS,
     DEFAULT_REFRESH_INTERVAL,
@@ -26,6 +31,11 @@ from .const import (
     DOMAIN,
     SENSOR_USAGE_NAME,
 )
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,12 +47,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up Contact Energy sensor from a config entry."""
     config = entry.data
-    api = ContactEnergyApi(config[CONF_EMAIL], config[CONF_PASSWORD])
+    api = ContactEnergyApi(config[CONF_ACCOUNT_ID], config[CONF_PASSWORD])
     usage_days = config.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS)
     refresh_hours = config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
 
     sensor = ContactEnergyUsageSensor(SENSOR_USAGE_NAME, api, usage_days, refresh_hours)
-    async_add_entities([sensor], False)
+    async_add_entities([sensor], update_before_add=True)
 
 
 class ContactEnergyUsageSensor(SensorEntity):
@@ -52,82 +62,87 @@ class ContactEnergyUsageSensor(SensorEntity):
     _attr_native_value = 0
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_unique_id = DOMAIN
-    _attr_device_class = "energy"
-    _attr_state_class = "total"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
-    def __init__(self, name: str, api: ContactEnergyApi, usage_days: int, refresh_hours: int):
+    def __init__(
+        self, name: str, api: ContactEnergyApi, usage_days: int, refresh_hours: int
+    ) -> None:
         """Initialise the sensor."""
         self._attr_name = name
         self._usage_days = usage_days
         self._api = api
-        self._scan_interval = timedelta(hours=refresh_hours)
+        self._refresh_hours = refresh_hours
 
-    @property
-    def scan_interval(self) -> timedelta:
-        """Dynamic polling interval set via config UI."""
-        return self._scan_interval
+    def _fetch_data_and_process(
+        self,
+    ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
+        """Fetch and process data using blocking API calls."""
+        # Only log in if we don't already have valid tokens/account info
+        if not getattr(self._api, "_contract_id", None) and not self._api.login():
+            _LOGGER.error("Failed to login - check credentials")
+            return None, None
 
-    def _fetch_data_and_process(self):
-        """Synchronous wrapper for blocking API calls."""
-        if not self._api._api_token:
-            if not self._api.login():
-                _LOGGER.error("Failed to login - check credentials")
-                return None, None
-
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        kWhStatistics = []
-        freeKWhStatistics = []
-        kWhRunningSum = 0.0
-        freeKWhRunningSum = 0.0
+        today = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        kwh_statistics: list[StatisticData] = []
+        free_kwh_statistics: list[StatisticData] = []
+        kwh_running_sum = 0.0
+        free_kwh_running_sum = 0.0
 
         for i in range(self._usage_days):
             previous_day = today - timedelta(days=self._usage_days - i)
             response = self._api.get_usage(
-                str(previous_day.year), f"{previous_day.month:02d}", f"{previous_day.day:02d}"
+                previous_day.year,
+                previous_day.month,
+                previous_day.day,
             )
             if response and isinstance(response, list):
                 for point in response:
                     if isinstance(point, dict) and point.get("value"):
+                        val = float(point["value"])
                         if point.get("offpeakValue") == "0.00":
-                            kWhRunningSum += float(point["value"])
+                            kwh_running_sum += val
                         else:
-                            freeKWhRunningSum += float(point["value"])
+                            free_kwh_running_sum += val
 
                         dt = datetime.strptime(point["date"], "%Y-%m-%dT%H:%M:%S.%f%z")
-                        freeKWhStatistics.append(StatisticData(start=dt, sum=freeKWhRunningSum))
-                        kWhStatistics.append(StatisticData(start=dt, sum=kWhRunningSum))
+                        free_kwh_statistics.append(
+                            StatisticData(start=dt, sum=free_kwh_running_sum)
+                        )
+                        kwh_statistics.append(
+                            StatisticData(start=dt, sum=kwh_running_sum)
+                        )
 
-        return kWhStatistics, freeKWhStatistics
+        return kwh_statistics, free_kwh_statistics
 
-    async def async_update(self):
+    async def async_update(self) -> None:
         """Begin usage update asynchronously."""
-        kWhStatistics, freeKWhStatistics = await self.hass.async_add_executor_job(
+        kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
             self._fetch_data_and_process
         )
 
-        if not kWhStatistics:
+        if not kwh_statistics:
             return
 
-        kWhMetadata = StatisticMetaData(
+        kwh_metadata = StatisticMetaData(
             has_mean=False,
             has_sum=True,
-            name="ContactEnergy",
+            name="NZ Contact Energy Consumption",
             source=DOMAIN,
             statistic_id=f"{DOMAIN}:energy_consumption",
-            unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-            mean_type=StatisticMeanType.NONE,
-            unit_class="energy",
+            unit_of_measurement=(UnitOfEnergy.KILO_WATT_HOUR),
         )
-        async_add_external_statistics(self.hass, kWhMetadata, kWhStatistics)
+        async_add_external_statistics(self.hass, kwh_metadata, kwh_statistics)
 
-        freeKWHMetadata = StatisticMetaData(
-            has_mean=False,
-            has_sum=True,
-            name="FreeContactEnergy",
-            source=DOMAIN,
-            statistic_id=f"{DOMAIN}:free_energy_consumption",
-            unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-            mean_type=StatisticMeanType.NONE,
-            unit_class="energy",
-        )
-        async_add_external_statistics(self.hass, freeKWHMetadata, freeKWhStatistics)
+        if free_kwh_statistics:
+            free_kwh_metadata = StatisticMetaData(
+                has_mean=False,
+                has_sum=True,
+                name="Free NZ Contact Energy Consumption",
+                source=DOMAIN,
+                statistic_id=f"{DOMAIN}:free_energy_consumption",
+                unit_of_measurement=str(UnitOfEnergy.KILO_WATT_HOUR),
+            )
+            async_add_external_statistics(
+                self.hass, free_kwh_metadata, free_kwh_statistics
+            )

@@ -1,14 +1,15 @@
-"""Constants for the Contact Energy sensors."""
+"""Constants for the NZ Contact Energy integration."""
 
-from logging import Logger, getLogger
+DOMAIN = "nz_contact_energy"
 
-LOGGER: Logger = getLogger(__package__)
-DOMAIN = "contact_energy"
-
-SENSOR_USAGE_NAME = "Contact Energy Usage"
+CONF_ACCOUNT_ID = "account_id"
+CONF_PASSWORD = "password"
 CONF_USAGE_DAYS = "usage_days"
 CONF_REFRESH_INTERVAL = "refresh_interval"
-CONF_ACCOUNT_ID = "account_id"
 
-DEFAULT_USAGE_DAYS = 10
-DEFAULT_REFRESH_INTERVAL = 24
+# Default Values
+DEFAULT_USAGE_DAYS = 30
+DEFAULT_REFRESH_INTERVAL = 2
+
+# Entity Names / Descriptive Constants
+SENSOR_USAGE_NAME = "NZ Contact Energy Consumption"

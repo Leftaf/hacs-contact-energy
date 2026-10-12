@@ -5,12 +5,18 @@
                 "title": "Connect to Contact Energy",
                 "description": "Enter your Contact Energy account credentials and preferences.",
                 "data": {
-                    "account_id": "Account ID",
+                    "account_id": "Email / Username",
                     "password": "Password",
-                    "default_usage_days": "Default Usage Days (History)",
-                    "default_refresh_interval": "Default Refresh Interval (hours)"
+                    "usage_days": "Default Usage Days (History)",
+                    "refresh_interval": "Default Refresh Interval (hours)"
                 }
             }
+        },
+        "data_description": {
+            "account_id": "The email address you use to log into the Contact Energy app / My Account",
+            "password": "Your Contact Energy account password",
+            "usage_days": "How many days of historical usage data to fetch",
+            "refresh_interval": "How often to pickup the data (hours)"
         },
         "error": {
             "invalid_auth": "Invalid account ID or password.",

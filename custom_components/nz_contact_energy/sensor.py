@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -45,8 +46,9 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Contact Energy sensor from a config entry."""
-    config = entry.data
+    # Options override the original config data
+    config = {**entry.data, **entry.options}
+
     api = ContactEnergyApi(config[CONF_ACCOUNT_ID], config[CONF_PASSWORD])
     usage_days = config.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS)
     refresh_hours = config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
@@ -78,10 +80,12 @@ class ContactEnergyUsageSensor(SensorEntity):
         self,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
         """Fetch and process data using blocking API calls."""
-        # Only log in if we don't already have valid tokens/account info
-        if not getattr(self._api, "_contract_id", None) and not self._api.login():
-            _LOGGER.error("Failed to login - check credentials")
-            return None, None
+
+        # Ensure we have a valid session
+        if not self._api._api_token or not self._api._contract_id:
+            if not self._api.login():
+                _LOGGER.error("Failed to login - check credentials")
+                return None, None
 
         today = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
         kwh_statistics: list[StatisticData] = []
@@ -91,27 +95,62 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         for i in range(self._usage_days):
             previous_day = today - timedelta(days=self._usage_days - i)
-            response = self._api.get_usage(
-                previous_day.year,
-                previous_day.month,
-                previous_day.day,
-            )
-            if response and isinstance(response, list):
+
+            try:
+                response = self._api.get_usage(
+                    previous_day.year,
+                    previous_day.month,
+                    previous_day.day,
+                )
+
+                # Small delay to avoid rate limiting
+                time.sleep(1.5)
+
+                if not response or not isinstance(response, list):
+                    _LOGGER.warning("No usable data for %s", previous_day.date())
+                    continue
+
+                _LOGGER.info(
+                    "Day %s → received %d points",
+                    previous_day.date(),
+                    len(response),
+                )
+
                 for point in response:
-                    if isinstance(point, dict) and point.get("value"):
+                    if not isinstance(point, dict) or not point.get("value"):
+                        continue
+
+                    try:
                         val = float(point["value"])
+                        dt = datetime.fromisoformat(point["date"])
+
                         if point.get("offpeakValue") == "0.00":
                             kwh_running_sum += val
                         else:
                             free_kwh_running_sum += val
 
-                        dt = datetime.strptime(point["date"], "%Y-%m-%dT%H:%M:%S.%f%z")
                         free_kwh_statistics.append(
                             StatisticData(start=dt, sum=free_kwh_running_sum)
                         )
                         kwh_statistics.append(
                             StatisticData(start=dt, sum=kwh_running_sum)
                         )
+
+                    except (ValueError, TypeError, KeyError) as err:
+                        _LOGGER.warning(
+                            "Skipping bad data point on %s: %s",
+                            previous_day.date(),
+                            err,
+                        )
+
+            except Exception:
+                _LOGGER.exception("Error processing day %s", previous_day.date())
+
+        _LOGGER.info(
+            "Finished processing → %d normal points, %d free points",
+            len(kwh_statistics),
+            len(free_kwh_statistics),
+        )
 
         return kwh_statistics, free_kwh_statistics
 

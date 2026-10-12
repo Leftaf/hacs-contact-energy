@@ -1,26 +1,25 @@
 """Config flow for NZ Contact Energy integration."""
 
-from __future__ import annotations  # noqa: I001
+from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
-if TYPE_CHECKING:
-    from homeassistant.data_entry_flow import FlowResult
-
-from .api import ContactEnergyApi  # noqa: I001
+from .api import ContactEnergyApi
 from .const import (
     CONF_ACCOUNT_ID,
+    CONF_DEBUG,
     CONF_USAGE_DAYS,
     CONF_REFRESH_INTERVAL,
+    DEFAULT_DEBUG,
     DEFAULT_REFRESH_INTERVAL,
     DEFAULT_USAGE_DAYS,
     DOMAIN,
@@ -28,7 +27,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Define the form layout and types using Voluptuous
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ACCOUNT_ID): str,
@@ -42,23 +40,20 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-
+    """Validate the user input allows us to connect."""
     if not data[CONF_ACCOUNT_ID] or not data[CONF_PASSWORD]:
         raise InvalidAuthError
 
-    """Validate the user input allows us to connect."""
     api = ContactEnergyApi(
         email=data[CONF_ACCOUNT_ID],
         password=data[CONF_PASSWORD],
     )
 
-    # Run blocking requests network call in an executor thread
     success = await hass.async_add_executor_job(api.login)
 
     if not success:
         raise InvalidAuthError
 
-    # Return info that you want to store in the config entry title/data.
     return {"title": f"Contact Energy ({data[CONF_ACCOUNT_ID]})"}
 
 
@@ -67,9 +62,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ):
+    async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step where the user enters credentials."""
         errors: dict[str, str] = {}
 
@@ -85,11 +78,60 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return OptionsFlowHandler(config_entry)
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options for NZ Contact Energy."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Prefer existing options, fall back to original config data
+        options = self.config_entry.options
+        data = self.config_entry.data
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_USAGE_DAYS,
+                        default=options.get(
+                            CONF_USAGE_DAYS,
+                            data.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS),
+                        ),
+                    ): cv.positive_int,
+                    vol.Optional(
+                        CONF_REFRESH_INTERVAL,
+                        default=options.get(
+                            CONF_REFRESH_INTERVAL,
+                            data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+                        ),
+                    ): cv.positive_int,
+                    vol.Optional(
+                        CONF_DEBUG,
+                        default=options.get(CONF_DEBUG, DEFAULT_DEBUG),
+                    ): bool,
+                }
+            ),
         )
 
 
 class InvalidAuthError(HomeAssistantError):
     """Error to indicate there is invalid auth."""
-
-    pass

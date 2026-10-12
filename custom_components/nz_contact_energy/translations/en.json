@@ -25,5 +25,22 @@
         "abort": {
             "already_configured": "This account is already configured."
         }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "NZ Contact Energy options",
+                "data": {
+                    "usage_days": "Usage days (history)",
+                    "refresh_interval": "Refresh interval (hours)",
+                    "debug": "Enable debug logging"
+                },
+                "data_description": {
+                    "usage_days": "How many days of historical usage data to fetch",
+                    "refresh_interval": "How often to update the data (hours)",
+                    "debug": "Turn on detailed logging for troubleshooting"
+                }
+            }
+        }
     }
 }

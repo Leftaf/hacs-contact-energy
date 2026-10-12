@@ -51,7 +51,10 @@ class ContactEnergyApi:
     def refresh_session(self) -> bool:
         """Refresh the session and update contract details."""
         headers = {"x-api-key": self._api_key}
-        data = {"token": self._api_token}
+        data = {
+        "username": self._email,
+        "password": self._password
+        }
 
         try:
             loginresult = requests.post(
@@ -90,8 +93,13 @@ class ContactEnergyApi:
                     first_account = accounts[0]
                     contracts = first_account.get("contracts", [])
                     if contracts:
+                        # Prefer electricity contract (contractType == 1)
+                        electricity = next(
+                        (c for c in contracts if c.get("contractType") == "1"),
+                        contracts[0]
+                        )
+                        self._contract_id = electricity.get("contractId", "")
                         self._account_id = first_account.get("id", "")
-                        self._contract_id = contracts[0].get("contractId", "")
                         return True
                     _LOGGER.error("No contracts found for customer account")
                     return False
@@ -105,44 +113,68 @@ class ContactEnergyApi:
 
         return False
 
-    def get_usage(self, year: int, month: int, day: int) -> Any | None:
+    def get_usage(self, year, month, day) -> Any | None:
         """Fetch usage data for a given date."""
+        # Accept both int and str
+        year = str(year)
+        month = str(month).zfill(2)
+        day = str(day).zfill(2)
+
         if not self._contract_id or not self._account_id:
             _LOGGER.warning("Missing account or contract ID. Attempting login...")
             if not self.login():
                 return None
 
-        date_str = f"{year:04d}-{month:02d}-{day:02d}"
-
         headers = {
             "x-api-key": self._api_key,
-            "session": self._api_session,
-            "authorization": (
-                f"Bearer {self._api_token}"
-                if not self._api_token.startswith("Bearer ")
-                else self._api_token
-            ),
+            "authorization": self._api_token,
         }
 
         url = (
             f"{self._url_base}/usage/v2/{self._contract_id}"
-            f"?ba={self._account_id}&interval=hourly&from={date_str}&to={date_str}"
+            f"?ba={self._account_id}&interval=hourly"
+            f"&from={year}-{month}-{day}&to={year}-{month}-{day}"
+        )
+
+        _LOGGER.debug(
+            "Fetching usage → Account: %s | Contract: %s | Date: %s | URL: %s",
+            self._account_id,
+            self._contract_id,
+            year,
+            month,
+            day,
+            url,
         )
 
         try:
             response = requests.post(url, headers=headers, timeout=15)
+
+            _LOGGER.debug(
+            "Usage response for %s-%s-%s → Status: %s | Body: %s",
+            year,
+            month,
+            day,
+            response.status_code,
+            response.text[:300],   # only first 300 characters
+            )
+
             if response.status_code == requests.codes.ok:
                 data = response.json()
                 if not data:
                     _LOGGER.info(
-                        "Fetched usage data for %s, but response was empty", date_str
+                    "Fetched usage data for %s/%s/%s, but response was empty",
+                    year,
+                    month,
+                    day
                     )
                 return data
 
             if response.status_code in (401, 403):
                 _LOGGER.warning(
-                    "Token expired or unauthorized for %s (Status %s). Resetting token.",
-                    date_str,
+                    "Token expired or unauthorized for %s/%s/%s (Status %s). Resetting token.",
+                    year,
+                    month,
+                    day,
                     response.status_code,
                 )
                 self._api_token = ""
@@ -150,12 +182,15 @@ class ContactEnergyApi:
                 return None
 
             _LOGGER.error(
-                "Failed to fetch usage data for %s (Status %s): %s",
-                date_str,
-                response.status_code,
-                response.text,
+            "Failed to fetch usage data for %s/%s/%s (Status %s): %s",
+            year,
+            month,
+            day,
+            response.status_code,
+            response.text,
             )
+            _LOGGER.debug(response)
         except requests.exceptions.RequestException:
-            _LOGGER.exception("Exception fetching usage for %s", date_str)
+        _LOGGER.exception("Exception fetching usage for %s/%s/%s", year, month, day)
 
         return None

@@ -13,3 +13,7 @@ DEFAULT_REFRESH_INTERVAL = 2
 
 # Entity Names / Descriptive Constants
 SENSOR_USAGE_NAME = "NZ Contact Energy Consumption"
+
+# enable Debug Mode posibility
+CONF_DEBUG = "debug"
+DEFAULT_DEBUG = False

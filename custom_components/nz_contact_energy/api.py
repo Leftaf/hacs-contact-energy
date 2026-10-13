@@ -39,7 +39,7 @@ class ContactEnergyApi:
             if loginresult.status_code == requests.codes.ok:
                 jsonresult = loginresult.json()
                 self._api_token = jsonresult.get("token", "")
-                _LOGGER.debug("Logged in successfully")
+                _LOGGER.debug("Login successfully")
                 return self.refresh_session()
 
             _LOGGER.error("Failed to login - check credentials: %s", loginresult.text)
@@ -77,12 +77,14 @@ class ContactEnergyApi:
 
     def get_accounts(self) -> bool:
         """Get the first account and contract ID."""
-        headers = {"x-api-key": self._api_key, "session": self._api_session}
+        headers = {
+            "x-api-key": self._api_key,
+            "session": self._api_session
+        }
         try:
             result = requests.get(
                 f"{self._url_base}/customer/v2?fetchAccounts=true",
-                headers=headers,
-                timeout=15,
+                headers=headers
             )
             if result.status_code == requests.codes.ok:
                 _LOGGER.debug("Retrieved accounts")
@@ -100,6 +102,13 @@ class ContactEnergyApi:
                         )
                         self._contract_id = electricity.get("contractId", "")
                         self._account_id = first_account.get("id", "")
+
+                        _LOGGER.debug(
+                            "Using account_id=%s contract_id=%s",
+                            self._account_id,
+                            self._contract_id,
+                        )
+
                         return True
                     _LOGGER.error("No contracts found for customer account")
                     return False
@@ -137,7 +146,7 @@ class ContactEnergyApi:
         )
 
         _LOGGER.debug(
-            "Fetching usage → Account: %s | Contract: %s | Date: %s | URL: %s",
+            "Fetching usage → Account: %s | Contract: %s | Date: %s/%s/%s | URL: %s",
             self._account_id,
             self._contract_id,
             year,
@@ -147,7 +156,7 @@ class ContactEnergyApi:
         )
 
         try:
-            response = requests.post(url, headers=headers, timeout=15)
+            response = requests.post(url, headers=headers)
 
             _LOGGER.debug(
             "Usage response for %s-%s-%s → Status: %s | Body: %s",
@@ -191,6 +200,6 @@ class ContactEnergyApi:
             )
             _LOGGER.debug(response)
         except requests.exceptions.RequestException:
-        _LOGGER.exception("Exception fetching usage for %s/%s/%s", year, month, day)
+            _LOGGER.exception("Exception fetching usage for %s/%s/%s", year, month, day)
 
         return None

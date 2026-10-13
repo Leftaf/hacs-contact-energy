@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry  # noqa: TC002
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant  # noqa: TC002
 
-from .const import CONF_DEBUG, DEFAULT_DEBUG, DOMAIN
+from .const import CONF_DEBUG, DEFAULT_DEBUG
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +17,6 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up NZ Contact Energy from a config entry."""
-
     # Enable debug logging if the option is turned on
     if entry.options.get(CONF_DEBUG, DEFAULT_DEBUG):
         logging.getLogger("custom_components.nz_contact_energy").setLevel(logging.DEBUG)

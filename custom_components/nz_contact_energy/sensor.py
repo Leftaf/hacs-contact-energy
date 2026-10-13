@@ -80,18 +80,29 @@ class ContactEnergyUsageSensor(SensorEntity):
         self,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
         """Fetch and process data using blocking API calls."""
-
+        _LOGGER.debug(
+            "token=%s contract=%s account=%s usage_days=%s",
+            bool(self._api._api_token),
+            self._api._contract_id,
+            self._api._account_id,
+            self._usage_days,
+        )
         # Ensure we have a valid session
         if not self._api._api_token or not self._api._contract_id:
+            _LOGGER.debug("No valid session – logging in")
             if not self._api.login():
                 _LOGGER.error("Failed to login - check credentials")
                 return None, None
+        else:
+            _LOGGER.debug("Existing session present – continuing")
 
         today = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
         kwh_statistics: list[StatisticData] = []
         free_kwh_statistics: list[StatisticData] = []
         kwh_running_sum = 0.0
         free_kwh_running_sum = 0.0
+
+        _LOGGER.debug("Starting usage fetch for %s days", self._usage_days)
 
         for i in range(self._usage_days):
             previous_day = today - timedelta(days=self._usage_days - i)
@@ -163,25 +174,27 @@ class ContactEnergyUsageSensor(SensorEntity):
         if not kwh_statistics:
             return
 
-        kwh_metadata = StatisticMetaData(
-            has_mean=False,
-            has_sum=True,
-            name="NZ Contact Energy Consumption",
-            source=DOMAIN,
-            statistic_id=f"{DOMAIN}:energy_consumption",
-            unit_of_measurement=(UnitOfEnergy.KILO_WATT_HOUR),
+        kwh_metadata: StatisticMetaData = {
+            "has_mean": False,
+            "has_sum": True,
+            "name": "NZ Contact Energy Consumption",
+            "source": DOMAIN,
+            "statistic_id": f"{DOMAIN}:energy_consumption",
+            "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+        }
+        async_add_external_statistics(
+            self.hass, kwh_metadata, kwh_statistics
         )
-        async_add_external_statistics(self.hass, kwh_metadata, kwh_statistics)
 
         if free_kwh_statistics:
-            free_kwh_metadata = StatisticMetaData(
-                has_mean=False,
-                has_sum=True,
-                name="Free NZ Contact Energy Consumption",
-                source=DOMAIN,
-                statistic_id=f"{DOMAIN}:free_energy_consumption",
-                unit_of_measurement=str(UnitOfEnergy.KILO_WATT_HOUR),
-            )
-            async_add_external_statistics(
-                self.hass, free_kwh_metadata, free_kwh_statistics
-            )
+        free_kwh_metadata: StatisticMetaData = {
+            "has_mean": False,
+            "has_sum": True,
+            "name": "Free NZ Contact Energy Consumption",
+            "source": DOMAIN,
+            "statistic_id": f"{DOMAIN}:free_energy_consumption",
+            "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+        }
+        async_add_external_statistics(
+            self.hass, free_kwh_metadata, free_kwh_statistics
+        )

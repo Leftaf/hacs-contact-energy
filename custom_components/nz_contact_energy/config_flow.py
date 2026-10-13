@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import voluptuous as vol
-
 import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
@@ -17,8 +16,8 @@ from .api import ContactEnergyApi
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_DEBUG,
-    CONF_USAGE_DAYS,
     CONF_REFRESH_INTERVAL,
+    CONF_USAGE_DAYS,
     DEFAULT_DEBUG,
     DEFAULT_REFRESH_INTERVAL,
     DEFAULT_USAGE_DAYS,
@@ -41,7 +40,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    if not data[CONF_ACCOUNT_ID] or not data[CONF_PASSWORD]:
+    if not data.get(CONF_ACCOUNT_ID) or not data.get(CONF_PASSWORD):
         raise InvalidAuthError
 
     api = ContactEnergyApi(
@@ -85,24 +84,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
-        return OptionsFlowHandler(config_entry)
+        return OptionsFlowHandler()
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for NZ Contact Energy."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Prefer existing options, fall back to original config data
+        # Prefer current options, fall back to original config data
         options = self.config_entry.options
         data = self.config_entry.data
 

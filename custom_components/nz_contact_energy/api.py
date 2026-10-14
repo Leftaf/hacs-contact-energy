@@ -39,7 +39,7 @@ class ContactEnergyApi:
             if loginresult.status_code == requests.codes.ok:
                 jsonresult = loginresult.json()
                 self._api_token = jsonresult.get("token", "")
-                _LOGGER.debug("Login successfully")
+                _LOGGER.debug("Logged in successfully")
                 return self.refresh_session()
 
             _LOGGER.error("Failed to login - check credentials: %s", loginresult.text)
@@ -164,7 +164,7 @@ class ContactEnergyApi:
             month,
             day,
             response.status_code,
-            response.text[:300],   # only first 300 characters
+            response.text
             )
 
             if response.status_code == requests.codes.ok:

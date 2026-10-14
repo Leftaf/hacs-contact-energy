@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.recorder.models import (
     StatisticData,
+    StatisticMeanType,
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import (
@@ -60,6 +61,9 @@ async def async_setup_entry(
 class ContactEnergyUsageSensor(SensorEntity):
     """Define Contact Energy Usage sensor."""
 
+    # Fallback if nothing is configured
+    SCAN_INTERVAL = timedelta(hours=DEFAULT_REFRESH_INTERVAL)
+
     _attr_icon = "mdi:meter-electric"
     _attr_native_value = 0
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -75,6 +79,9 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._usage_days = usage_days
         self._api = api
         self._refresh_hours = refresh_hours
+
+        # Fallback if nothing is configured
+        self.SCAN_INTERVAL = timedelta(hours=max(1, refresh_hours))
 
     def _fetch_data_and_process(
         self,
@@ -175,26 +182,28 @@ class ContactEnergyUsageSensor(SensorEntity):
             return
 
         kwh_metadata: StatisticMetaData = {
-            "has_mean": False,
             "has_sum": True,
             "name": "NZ Contact Energy Consumption",
             "source": DOMAIN,
             "statistic_id": f"{DOMAIN}:energy_consumption",
             "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+            "mean_type": StatisticMeanType.NONE,
+            "unit_class": "energy"
         }
         async_add_external_statistics(
             self.hass, kwh_metadata, kwh_statistics
         )
 
         if free_kwh_statistics:
-        free_kwh_metadata: StatisticMetaData = {
-            "has_mean": False,
-            "has_sum": True,
-            "name": "Free NZ Contact Energy Consumption",
-            "source": DOMAIN,
-            "statistic_id": f"{DOMAIN}:free_energy_consumption",
-            "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
-        }
-        async_add_external_statistics(
-            self.hass, free_kwh_metadata, free_kwh_statistics
-        )
+            free_kwh_metadata: StatisticMetaData = {
+                "has_sum": True,
+                "name": "Free NZ Contact Energy Consumption",
+                "source": DOMAIN,
+                "statistic_id": f"{DOMAIN}:free_energy_consumption",
+                "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+                "mean_type": StatisticMeanType.NONE,
+                "unit_class": "energy"
+            }
+            async_add_external_statistics(
+                self.hass, free_kwh_metadata, free_kwh_statistics
+            )

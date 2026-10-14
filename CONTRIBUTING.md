@@ -50,11 +50,16 @@ Use [black](https://github.com/ambv/black) to make sure the code follows the sty
 
 This custom component is based on [nz_contact_energy template](https://github.com/ludeeus/nz_contact_energy).
 
-It comes with development environment in a container, easy to launch
-if you use Visual Studio Code. With this container you will have a stand alone
-Home Assistant instance running and already configured with the included
-[`configuration.yaml`](./config/configuration.yaml)
-file.
+It comes with a development environment in a container, easy to launch if you
+use Visual Studio Code. The development Home Assistant instance uses the
+configuration and data in the mounted volume. If that volume has no
+`configuration.yaml`, the launcher seeds it with the included
+[`configuration.yaml`](./config/configuration.yaml).
+
+The devcontainer mounts the Docker volume `homeassistant_nz-contact-energy`
+at `/config` and uses it for Home Assistant's configuration and data. Reopen
+or rebuild the devcontainer after changing its configuration. Avoid running
+another Home Assistant instance against this same volume at the same time.
 
 ## License
 

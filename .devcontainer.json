@@ -5,6 +5,12 @@
     "forwardPorts": [
         8123
     ],
+    "mounts": [
+        "source=homeassistant_nz-contact-energy,target=/config,type=volume"
+    ],
+    "containerEnv": {
+        "HA_CONFIG_DIR": "/config"
+    },
     "portsAttributes": {
         "8123": {
             "label": "Home Assistant",

@@ -159,12 +159,12 @@ class ContactEnergyApi:
             response = requests.post(url, headers=headers)
 
             _LOGGER.debug(
-            "Usage response for %s-%s-%s → Status: %s | Body: %s",
-            year,
-            month,
-            day,
-            response.status_code,
-            response.text
+                "Usage response for %s-%s-%s → Status: %s | Body: %s",
+                year,
+                month,
+                day,
+                response.status_code,
+                response.text[:100],
             )
 
             if response.status_code == requests.codes.ok:

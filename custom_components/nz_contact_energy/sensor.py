@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from homeassistant.components.recorder.models import (
@@ -26,13 +26,16 @@ from homeassistant.util import dt as dt_util
 from .api import ContactEnergyApi
 from .const import (
     CONF_ACCOUNT_ID,
+    CONF_DELTA_NO_DATA_DAYS,
+    CONF_FIRST_DAY_HISTORY,
     CONF_REFRESH_INTERVAL,
-    CONF_USAGE_DAYS,
+    DEFAULT_DELTA_NO_DATA_DAYS,
     DEFAULT_REFRESH_INTERVAL,
-    DEFAULT_USAGE_DAYS,
     DOMAIN,
     SENSOR_USAGE_NAME,
+    default_first_day_history,
 )
+from custom_components.nz_contact_energy import api
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -40,6 +43,25 @@ if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _date_range(self) -> tuple[date, date]:
+    today = dt_util.now().date()
+    end = today - timedelta(days=1)
+    first = date.fromisoformat(self._first_day_history)
+    delta_start = today - timedelta(days=self._delta_no_data_days)
+
+    start = max(first, delta_start)
+    start = min(start, end)
+
+    store = self.hass.data[DOMAIN][self._entry_id]
+    if not store.get("history_imported"):
+        # First successful full import window
+        start = first
+    else:
+        start = max(first, today - timedelta(days=self._delta_no_data_days))
+
+    return start, end
 
 
 async def async_setup_entry(
@@ -51,10 +73,24 @@ async def async_setup_entry(
     config = {**entry.data, **entry.options}
 
     api = ContactEnergyApi(config[CONF_ACCOUNT_ID], config[CONF_PASSWORD])
-    usage_days = config.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS)
-    refresh_hours = config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
 
-    sensor = ContactEnergyUsageSensor(SENSOR_USAGE_NAME, api, usage_days, refresh_hours)
+    first_day_history = config.get(
+        CONF_FIRST_DAY_HISTORY, default_first_day_history()
+    )
+    delta_no_data_days = config.get(
+        CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
+    )
+    refresh_hours = config.get(
+        CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL
+    )
+    sensor = ContactEnergyUsageSensor(
+        SENSOR_USAGE_NAME,
+        api,
+        first_day_history,
+        delta_no_data_days,
+        refresh_hours,
+        entry.entry_id,
+    )
     async_add_entities([sensor], update_before_add=True)
 
 
@@ -72,13 +108,21 @@ class ContactEnergyUsageSensor(SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(
-        self, name: str, api: ContactEnergyApi, usage_days: int, refresh_hours: int
+        self,
+        name: str,
+        api: ContactEnergyApi,
+        first_day_history: str,
+        delta_no_data_days: int,
+        refresh_hours: int,
+        entry_id: str,
     ) -> None:
         """Initialise the sensor."""
         self._attr_name = name
-        self._usage_days = usage_days
         self._api = api
+        self._first_day_history = first_day_history
+        self._delta_no_data_days = delta_no_data_days
         self._refresh_hours = refresh_hours
+        self._entry_id = entry_id
 
         # Fallback if nothing is configured
         self.SCAN_INTERVAL = timedelta(hours=max(1, refresh_hours))
@@ -87,12 +131,15 @@ class ContactEnergyUsageSensor(SensorEntity):
         self,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
         """Fetch and process data using blocking API calls."""
+        start, end = self._date_range()
+
         _LOGGER.debug(
-            "token=%s contract=%s account=%s usage_days=%s",
+            "token=%s contract=%s account=%s range=%s → %s",
             bool(self._api._api_token),
             self._api._contract_id,
             self._api._account_id,
-            self._usage_days,
+            start,
+            end,
         )
         # Ensure we have a valid session
         if not self._api._api_token or not self._api._contract_id:
@@ -109,30 +156,22 @@ class ContactEnergyUsageSensor(SensorEntity):
         kwh_running_sum = 0.0
         free_kwh_running_sum = 0.0
 
-        _LOGGER.debug("Starting usage fetch for %s days", self._usage_days)
+        _LOGGER.debug("Starting usage fetch from %s to %s", start, end)
 
-        for i in range(self._usage_days):
-            previous_day = today - timedelta(days=self._usage_days - i)
+        day = start
 
+        while day <= end:
             try:
-                response = self._api.get_usage(
-                    previous_day.year,
-                    previous_day.month,
-                    previous_day.day,
-                )
+                response = self._api.get_usage(day.year, day.month, day.day)
 
-                # Small delay to avoid rate limiting
                 time.sleep(1.5)
 
                 if not response or not isinstance(response, list):
-                    _LOGGER.warning("No usable data for %s", previous_day.date())
+                    _LOGGER.warning("No usable data for %s", day)
+                    day += timedelta(days=1)
                     continue
 
-                _LOGGER.info(
-                    "Day %s → received %d points",
-                    previous_day.date(),
-                    len(response),
-                )
+                _LOGGER.info("Day %s → received %d points", day, len(response))
 
                 for point in response:
                     if not isinstance(point, dict) or not point.get("value"):
@@ -144,32 +183,30 @@ class ContactEnergyUsageSensor(SensorEntity):
 
                         if point.get("offpeakValue") == "0.00":
                             kwh_running_sum += val
+                            kwh_statistics.append(
+                                StatisticData(start=dt, sum=kwh_running_sum)
+                            )
                         else:
                             free_kwh_running_sum += val
-
-                        free_kwh_statistics.append(
-                            StatisticData(start=dt, sum=free_kwh_running_sum)
-                        )
-                        kwh_statistics.append(
-                            StatisticData(start=dt, sum=kwh_running_sum)
-                        )
+                            free_kwh_statistics.append(
+                                StatisticData(start=dt, sum=free_kwh_running_sum)
+                            )
 
                     except (ValueError, TypeError, KeyError) as err:
-                        _LOGGER.warning(
-                            "Skipping bad data point on %s: %s",
-                            previous_day.date(),
-                            err,
-                        )
+                        _LOGGER.warning("Skipping bad data point on %s: %s", day, err)
 
             except Exception:
-                _LOGGER.exception("Error processing day %s", previous_day.date())
+                _LOGGER.exception("Error processing day %s", day)
+
+            day += timedelta(days=1)
 
         _LOGGER.info(
-            "Finished processing → %d normal points, %d free points",
+            "Finished processing %s → %s: %d normal points, %d free points",
+            start,
+            end,
             len(kwh_statistics),
             len(free_kwh_statistics),
         )
-
         return kwh_statistics, free_kwh_statistics
 
     async def async_update(self) -> None:

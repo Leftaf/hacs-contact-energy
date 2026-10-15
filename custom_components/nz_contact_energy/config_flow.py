@@ -15,13 +15,13 @@ from homeassistant.exceptions import HomeAssistantError
 from .api import ContactEnergyApi
 from .const import (
     CONF_ACCOUNT_ID,
-    CONF_DEBUG,
+    CONF_DELTA_NO_DATA_DAYS,
+    CONF_FIRST_DAY_HISTORY,
     CONF_REFRESH_INTERVAL,
-    CONF_USAGE_DAYS,
-    DEFAULT_DEBUG,
+    DEFAULT_DELTA_NO_DATA_DAYS,
     DEFAULT_REFRESH_INTERVAL,
-    DEFAULT_USAGE_DAYS,
     DOMAIN,
+    default_first_day_history,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,7 +30,14 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ACCOUNT_ID): str,
         vol.Required(CONF_PASSWORD): str,
-        vol.Optional(CONF_USAGE_DAYS, default=DEFAULT_USAGE_DAYS): cv.positive_int,
+        vol.Optional(
+            CONF_FIRST_DAY_HISTORY,
+            default=default_first_day_history(),
+        ): str,  # "YYYY-MM-DD"
+        vol.Optional(
+            CONF_DELTA_NO_DATA_DAYS,
+            default=DEFAULT_DELTA_NO_DATA_DAYS
+        ): cv.positive_int,
         vol.Optional(
             CONF_REFRESH_INTERVAL, default=DEFAULT_REFRESH_INTERVAL
         ): cv.positive_int,
@@ -107,24 +114,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
-                        CONF_USAGE_DAYS,
-                        default=options.get(
-                            CONF_USAGE_DAYS,
-                            data.get(CONF_USAGE_DAYS, DEFAULT_USAGE_DAYS),
+                vol.Optional(
+                    CONF_DELTA_NO_DATA_DAYS,
+                    default=options.get(
+                        CONF_DELTA_NO_DATA_DAYS,
+                        data.get(
+                            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
                         ),
-                    ): cv.positive_int,
-                    vol.Optional(
+                    ),
+                ): cv.positive_int,
+                vol.Optional(
+                    CONF_REFRESH_INTERVAL,
+                    default=options.get(
                         CONF_REFRESH_INTERVAL,
-                        default=options.get(
-                            CONF_REFRESH_INTERVAL,
-                            data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
-                        ),
-                    ): cv.positive_int,
-                    vol.Optional(
-                        CONF_DEBUG,
-                        default=options.get(CONF_DEBUG, DEFAULT_DEBUG),
-                    ): bool,
+                        data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+                    ),
+                ): cv.positive_int,
                 }
             ),
         )

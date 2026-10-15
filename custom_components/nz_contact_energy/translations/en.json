@@ -7,7 +7,8 @@
                 "data": {
                     "account_id": "Email / Username",
                     "password": "Password",
-                    "usage_days": "Default Usage Days (History)",
+                    "first_day_history": "First day of historical import",
+                    "delta_no_data_days": "Days to re-fetch (lag window)",
                     "refresh_interval": "Default Refresh Interval (hours)"
                 }
             }
@@ -15,8 +16,9 @@
         "data_description": {
             "account_id": "The email address you use to log into the Contact Energy app / My Account",
             "password": "Your Contact Energy account password",
-            "usage_days": "How many days of historical usage data to fetch",
-            "refresh_interval": "How often to pickup the data (hours)"
+            "first_day_history": "The first day of historical data to import",
+            "delta_no_data_days": "Delta Days where no data are provided.",
+            "refresh_interval": "On each update, re-request this many days before today (Contact data often lags). Default: 2."
         },
         "error": {
             "invalid_auth": "Invalid account ID or password.",
@@ -31,14 +33,12 @@
             "init": {
                 "title": "NZ Contact Energy options",
                 "data": {
-                    "usage_days": "Usage days (history)",
                     "refresh_interval": "Refresh interval (hours)",
-                    "debug": "Enable debug logging"
+                    "delta_no_data_days": "Delta Days where no data are provided."
                 },
                 "data_description": {
-                    "usage_days": "How many days of historical usage data to fetch",
-                    "refresh_interval": "How often to update the data (hours)",
-                    "debug": "Turn on detailed logging for troubleshooting"
+                    "refresh_interval": "As Data are only provided once each night, this is the interval between updates. Default: 24 hours.",
+                    "delta_no_data_days": "On each update, re-request this many days before today (Contact data often lags)."
                 }
             }
         }

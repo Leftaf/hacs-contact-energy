@@ -13,7 +13,6 @@ CONF_FIRST_DAY_HISTORY =  "first_day_history"   # "YYYY-MM-DD"
 CONF_DELTA_NO_DATA_DAYS = "delta_no_data_days"  # int
 
 # Default Values
-DEFAULT_REFRESH_INTERVAL = 2
 DEFAULT_REFRESH_INTERVAL = 24
 DEFAULT_DELTA_NO_DATA_DAYS = 2
 

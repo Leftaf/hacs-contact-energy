@@ -19,6 +19,8 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import CONF_PASSWORD, UnitOfEnergy
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .api import ContactEnergyApi
@@ -47,30 +49,31 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Contact Energy sensor from a config entry."""
+    """Set up Contact Energy sensor — do not block on history."""
     config = {**entry.data, **entry.options}
 
     api = ContactEnergyApi(config[CONF_ACCOUNT_ID], config[CONF_PASSWORD])
 
-    first_day_history = config.get(CONF_FIRST_DAY_HISTORY, default_first_day_history())
-    delta_no_data_days = config.get(CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS)
-    refresh_hours = config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
-
     sensor = ContactEnergyUsageSensor(
-        SENSOR_USAGE_NAME,
-        api,
-        first_day_history,
-        delta_no_data_days,
-        refresh_hours,
-        entry.entry_id,
+        name=SENSOR_USAGE_NAME,
+        api=api,
+        first_day_history=config.get(
+            CONF_FIRST_DAY_HISTORY, default_first_day_history()
+        ),
+        delta_no_data_days=config.get(
+            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
+        ),
+        refresh_hours=config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+        entry_id=entry.entry_id,
     )
-    async_add_entities([sensor], update_before_add=True)
+    # False = setup returns immediately; data loads in background
+    async_add_entities([sensor], update_before_add=False)
 
 
 class ContactEnergyUsageSensor(SensorEntity):
-    """Define Contact Energy Usage sensor."""
+    """Contact Energy usage → external statistics for the Energy dashboard."""
 
-    SCAN_INTERVAL = timedelta(hours=DEFAULT_REFRESH_INTERVAL)
+    _attr_should_poll = False
 
     _attr_icon = "mdi:meter-electric"
     _attr_native_value = 0
@@ -78,6 +81,8 @@ class ContactEnergyUsageSensor(SensorEntity):
     _attr_unique_id = DOMAIN
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_has_entity_name = True
+    _attr_name = "Consumption"
 
     def __init__(
         self,
@@ -95,40 +100,114 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._delta_no_data_days = max(1, int(delta_no_data_days))
         self._refresh_hours = max(1, int(refresh_hours))
         self._entry_id = entry_id
-        # Note: SCAN_INTERVAL is mainly read from the class; reload after options change
-        self.__class__.SCAN_INTERVAL = timedelta(hours=self._refresh_hours)
+        self._import_task = None
+        self._unsub_interval = None
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name=f"Account {self._api._account_id}",
+            manufacturer="Home Assistant Community",
+            model=f"Contract {self._api._contract_id}",
+            serial_number=str(self._api._contract_id),
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://github.com/Leftaf/hacs-contact-energy",
+            sw_version="0.1.0",
+        )
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]: # type: ignore  # noqa: F821
+        """Return the state attributes."""
+        return {
+            "account": self._api._account_id,
+            "contract_id": self._api._contract_id,
+            "first_day_history": self._first_day_history,
+            "delta_no_data_days": self._delta_no_data_days,
+            "refresh_interval_hours": self._refresh_hours,
+        }
 
-    def _date_range(self) -> tuple[date, date]:
-        """Return inclusive (start, end). end is always yesterday."""
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def async_added_to_hass(self) -> None:
+        """Entity is in HA — start history import or a short refresh."""
+        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+
+        if not store.get("history_imported"):
+            _LOGGER.info(
+                "Scheduling background historical import from %s",
+                self._first_day_history,
+            )
+            self._import_task = self.hass.async_create_task(
+                self._async_import_history()
+            )
+        else:
+            # Quick lag-window update only
+            self.hass.async_create_task(self.async_update_ha_state(force_refresh=True))
+
+        # call only once per interval, not on every HA 30 sec update
+        self._unsub_interval = async_track_time_interval(
+            self.hass,
+            self._async_interval_update,
+            timedelta(hours=self._refresh_hours),
+        )
+
+    async def _async_interval_update(self, _now=None) -> None:
+        """Called on the configured interval."""
+        await self.async_update_ha_state(force_refresh=True)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Clean up when entity is removed."""
+        if self._unsub_interval is not None:
+            self._unsub_interval()
+            self._unsub_interval = None
+
+        if self._import_task is not None and not self._import_task.done():
+            self._import_task.cancel()
+            self._import_task = None
+
+        if hasattr(self._api, "close"):
+            self._api.close() # pyright: ignore[reportAttributeAccessIssue]
+
+
+    # ------------------------------------------------------------------
+    # Date range
+    # ------------------------------------------------------------------
+
+    def _date_range(self, *, full_history: bool = False) -> tuple[date, date]:
+        """
+        Return the inclusive date range, ending yesterday.
+
+        Full history starts at first_day_history; normal polls use the lag window.
+        """
         today = dt_util.now().date()
         end = today - timedelta(days=1)
         first = date.fromisoformat(self._first_day_history)
 
-        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
-
-        if not store.get("history_imported"):
-            # First successful run: full backfill from configured first day
+        if full_history:
             start = first
         else:
-            # Later runs: only the lag window
             start = max(first, today - timedelta(days=self._delta_no_data_days))
 
         start = min(start, end)
         return start, end
 
+    # ------------------------------------------------------------------
+    # Blocking fetch (runs in executor)
+    # ------------------------------------------------------------------
+
     def _fetch_data_and_process(
-        self,
+        self, full_history: bool = False
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
-        """Fetch and process data using blocking API calls."""
-        start, end = self._date_range()
+        """Fetch usage and build statistic points. Blocking — executor only."""
+        start, end = self._date_range(full_history=full_history)
 
         _LOGGER.debug(
-            "token=%s contract=%s account=%s range=%s → %s",
+            "token=%s contract=%s account=%s range=%s → %s (full_history=%s)",
             bool(self._api._api_token),
             self._api._contract_id,
             self._api._account_id,
             start,
             end,
+            full_history,
         )
 
         if not self._api._api_token or not self._api._contract_id:
@@ -144,7 +223,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         kwh_running_sum = 0.0
         free_kwh_running_sum = 0.0
 
-        _LOGGER.debug("Starting usage fetch from %s to %s", start, end)
+        _LOGGER.info("Starting usage fetch from %s to %s", start, end)
 
         day = start
         while day <= end:
@@ -162,7 +241,6 @@ class ContactEnergyUsageSensor(SensorEntity):
                 for point in response:
                     if not isinstance(point, dict) or not point.get("value"):
                         continue
-
                     try:
                         val = float(point["value"])
                         dt = datetime.fromisoformat(point["date"])
@@ -177,7 +255,6 @@ class ContactEnergyUsageSensor(SensorEntity):
                             free_kwh_statistics.append(
                                 StatisticData(start=dt, sum=free_kwh_running_sum)
                             )
-
                     except (ValueError, TypeError, KeyError) as err:
                         _LOGGER.warning("Skipping bad data point on %s: %s", day, err)
 
@@ -187,45 +264,27 @@ class ContactEnergyUsageSensor(SensorEntity):
             day += timedelta(days=1)
 
         _LOGGER.info(
-            "Finished processing %s → %s: %d normal points, %d free points",
+            "Finished processing %s → %s: %d normal, %d free",
             start,
             end,
             len(kwh_statistics),
             len(free_kwh_statistics),
         )
-
-        # Optional: expose last total on the entity
         self._attr_native_value = round(kwh_running_sum, 2)
-
         return kwh_statistics, free_kwh_statistics
 
-    async def async_update(self) -> None:
-        """Begin usage update asynchronously."""
-        kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
-            self._fetch_data_and_process
-        )
+    # ------------------------------------------------------------------
+    # Write statistics (main thread)
+    # ------------------------------------------------------------------
 
-        # Login failed
-        if kwh_statistics is None:
-            return
-
-        # Mark history as imported (survives restart via config entry data)
-        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
-        if not store.get("history_imported"):
-            store["history_imported"] = True
-            entry = self.hass.config_entries.async_get_entry(self._entry_id)
-            if entry is not None:
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    data={**entry.data, "history_imported": True},
-                )
-            _LOGGER.info("Historical import flag set for entry %s", self._entry_id)
-
-        if not kwh_statistics and not free_kwh_statistics:
-            return
-
+    def _write_statistics(
+        self,
+        kwh_statistics: list[StatisticData],
+        free_kwh_statistics: list[StatisticData],
+    ) -> None:
+        """Push external statistics into the recorder."""
         if kwh_statistics:
-            kwh_metadata: StatisticMetaData = {
+            metadata: StatisticMetaData = {
                 "has_sum": True,
                 "name": "NZ Contact Energy Consumption",
                 "source": DOMAIN,
@@ -234,10 +293,10 @@ class ContactEnergyUsageSensor(SensorEntity):
                 "mean_type": StatisticMeanType.NONE,
                 "unit_class": "energy",
             }
-            async_add_external_statistics(self.hass, kwh_metadata, kwh_statistics)
+            async_add_external_statistics(self.hass, metadata, kwh_statistics)
 
         if free_kwh_statistics:
-            free_kwh_metadata: StatisticMetaData = {
+            metadata = {
                 "has_sum": True,
                 "name": "Free NZ Contact Energy Consumption",
                 "source": DOMAIN,
@@ -246,6 +305,65 @@ class ContactEnergyUsageSensor(SensorEntity):
                 "mean_type": StatisticMeanType.NONE,
                 "unit_class": "energy",
             }
-            async_add_external_statistics(
-                self.hass, free_kwh_metadata, free_kwh_statistics
+            async_add_external_statistics(self.hass, metadata, free_kwh_statistics)
+
+    def _mark_history_imported(self) -> None:
+        """Persist history_imported so restarts skip full backfill."""
+        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+        if store.get("history_imported"):
+            return
+
+        store["history_imported"] = True
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
+        if entry is not None:
+            self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, "history_imported": True}
             )
+        _LOGGER.info("Historical import marked complete for %s", self._entry_id)
+
+    # ------------------------------------------------------------------
+    # Background one-time history import
+    # ------------------------------------------------------------------
+
+    async def _async_import_history(self) -> None:
+        """Full backfill in the background — does not block setup/UI."""
+        _LOGGER.info("Background historical import started")
+        try:
+            kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
+                self._fetch_data_and_process,
+                True,  # full_history
+            )
+        except Exception:
+            _LOGGER.exception("Background historical import failed")
+            return
+
+        if kwh_statistics is None:
+            _LOGGER.error("Historical import aborted (login failed)")
+            return
+
+        self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
+        self._mark_history_imported()
+        _LOGGER.info("Background historical import finished")
+        await self.async_update_ha_state()
+
+    # ------------------------------------------------------------------
+    # Normal periodic update (lag window only)
+    # ------------------------------------------------------------------
+
+    async def async_update(self) -> None:
+        """Short update: last delta_no_data_days only."""
+        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+
+        if not store.get("history_imported"):
+            _LOGGER.debug("Skipping poll; historical import still pending/running")
+            return
+
+        kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
+            self._fetch_data_and_process,
+            False,  # full_history
+        )
+
+        if kwh_statistics is None:
+            return
+
+        self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])

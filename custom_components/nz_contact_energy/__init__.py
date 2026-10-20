@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import logging
+import voluptuous as vol
+
+from datetime import date
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 
@@ -14,15 +18,48 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
+SERVICE_IMPORT_USAGE = "import_usage"
+
+SERVICE_IMPORT_SCHEMA = vol.Schema(
+    {
+        vol.Required("start_date"): cv.date,
+        vol.Optional("end_date"): cv.date,
+    }
+)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up NZ Contact Energy from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "history_imported": entry.data.get("history_imported", False),
+        "sensor": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register service once (guard against reloads)
+    if not hass.services.has_service(DOMAIN, SERVICE_IMPORT_USAGE):
+
+        async def async_import_usage(call: ServiceCall) -> None:
+            start: date = call.data["start_date"]
+            end: date | None = call.data.get("end_date")
+
+            # Use the first (usually only) configured entry
+            for entry_id, store in hass.data.get(DOMAIN, {}).items():
+                sensor = store.get("sensor")
+                if sensor is not None:
+                    await sensor.async_import_date_range(start, end)
+                    return
+
+            _LOGGER.error("No Contact Energy sensor available for import_usage")
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_IMPORT_USAGE,
+            async_import_usage,
+            schema=SERVICE_IMPORT_SCHEMA,
+        )
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True

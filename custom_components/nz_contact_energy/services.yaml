@@ -1,0 +1,16 @@
+import_usage:
+  name: Import usage for date range
+  description: Fetch Contact Energy usage for a specific past date range and insert it into the Energy Dashboard statistics.
+  fields:
+    start_date:
+      name: Start date
+      description: First day to import (YYYY-MM-DD)
+      required: true
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Last day to import (optional – leave empty for a single day)
+      required: false
+      selector:
+        date:

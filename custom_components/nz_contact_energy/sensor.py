@@ -69,6 +69,9 @@ async def async_setup_entry(
     # False = setup returns immediately; data loads in background
     async_add_entities([sensor], update_before_add=False)
 
+    # Make it reachable from the service
+    hass.data[DOMAIN][entry.entry_id]["sensor"] = sensor
+
 
 class ContactEnergyUsageSensor(SensorEntity):
     """Contact Energy usage → external statistics for the Energy dashboard."""
@@ -195,10 +198,18 @@ class ContactEnergyUsageSensor(SensorEntity):
     # ------------------------------------------------------------------
 
     def _fetch_data_and_process(
-        self, full_history: bool = False
+        self,
+        full_history: bool = False,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
         """Fetch usage and build statistic points. Blocking — executor only."""
-        start, end = self._date_range(full_history=full_history)
+
+        if start_date is not None:
+            start = start_date
+            end = end_date or start_date
+        else:
+            start, end = self._date_range(full_history=full_history)
 
         _LOGGER.debug(
             "token=%s contract=%s account=%s range=%s → %s (full_history=%s)",
@@ -345,6 +356,37 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._mark_history_imported()
         _LOGGER.info("Background historical import finished")
         await self.async_update_ha_state()
+
+    # ------------------------------------------------------------------
+    # Data Fix import
+    # ------------------------------------------------------------------
+
+    async def async_import_date_range(
+        self,
+        start_date: date,
+        end_date: date | None = None,
+    ) -> None:
+        """Fetch and insert statistics for an explicit date range."""
+        end = end_date or start_date
+        if end < start_date:
+            raise ValueError("end_date must be >= start_date")
+
+        _LOGGER.info("Manual import requested: %s → %s", start_date, end)
+
+        kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
+            self._fetch_data_and_process,
+            False,  # full_history (ignored when dates given)
+            start_date,
+            end,
+        )
+
+        if kwh_statistics is None:
+            _LOGGER.error("Manual import failed (login or API error)")
+            return
+
+        self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
+        await self.async_update_ha_state()
+        _LOGGER.info("Manual import finished: %s → %s", start_date, end)
 
     # ------------------------------------------------------------------
     # Normal periodic update (lag window only)

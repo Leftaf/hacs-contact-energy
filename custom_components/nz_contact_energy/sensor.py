@@ -363,7 +363,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
         self._mark_history_imported()
         _LOGGER.info("Background historical import finished")
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
 
     # ------------------------------------------------------------------
     # Data Fix import
@@ -398,7 +398,8 @@ class ContactEnergyUsageSensor(SensorEntity):
             return
 
         self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
+        
         _LOGGER.info("Manual import finished: %s → %s", start_date, end)
 
     # ------------------------------------------------------------------

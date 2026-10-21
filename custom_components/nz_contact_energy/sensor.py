@@ -13,6 +13,9 @@ from homeassistant.components.recorder.models import (
     StatisticMetaData,
 )
 from homeassistant.components.recorder.statistics import async_add_external_statistics
+from homeassistant.components.recorder.statistics import get_last_statistics
+from homeassistant.util import dt as dt_util
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -21,7 +24,7 @@ from homeassistant.components.sensor import (
 from homeassistant.const import CONF_PASSWORD, UnitOfEnergy
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.util import dt as dt_util
+from homeassistant.helpers.recorder import get_instance
 
 from .api import ContactEnergyApi
 from .const import (
@@ -42,6 +45,9 @@ if TYPE_CHECKING:
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 _LOGGER = logging.getLogger(__name__)
+
+STATISTIC_ID = f"{DOMAIN}:energy_consumption"
+FREE_STATISTIC_ID = f"{DOMAIN}:free_energy_consumption"
 
 
 async def async_setup_entry(
@@ -202,6 +208,8 @@ class ContactEnergyUsageSensor(SensorEntity):
         full_history: bool = False,
         start_date: date | None = None,
         end_date: date | None = None,
+        kwh_seed: float = 0.0,
+        free_seed: float = 0.0,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
         """Fetch usage and build statistic points. Blocking — executor only."""
 
@@ -231,8 +239,8 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         kwh_statistics: list[StatisticData] = []
         free_kwh_statistics: list[StatisticData] = []
-        kwh_running_sum = 0.0
-        free_kwh_running_sum = 0.0
+        kwh_running_sum = kwh_seed
+        free_kwh_running_sum = free_seed
 
         _LOGGER.info("Starting usage fetch from %s to %s", start, end)
 
@@ -373,11 +381,16 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         _LOGGER.info("Manual import requested: %s → %s", start_date, end)
 
+        kwh_seed = await self._async_get_last_sum(STATISTIC_ID, start_date)
+        free_seed = await self._async_get_last_sum(FREE_STATISTIC_ID, start_date)
+
         kwh_statistics, free_kwh_statistics = await self.hass.async_add_executor_job(
             self._fetch_data_and_process,
             False,  # full_history (ignored when dates given)
             start_date,
             end,
+            kwh_seed,
+            free_seed,
         )
 
         if kwh_statistics is None:
@@ -409,3 +422,28 @@ class ContactEnergyUsageSensor(SensorEntity):
             return
 
         self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
+
+    # ------------------------------------------------------------------
+    # Read last known sum for a statistic_id (used for data fix imports)
+    # ------------------------------------------------------------------
+
+    async def _async_get_last_sum(self, statistic_id: str, before: date) -> float:
+        """Return the last known sum for statistic_id before the given date."""
+        # Look at the hour just before the start of the requested range
+        end = dt_util.start_of_local_day(before)  # midnight of start_date
+
+        stats = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics,
+            self.hass,
+            1,  # only need the latest one
+            statistic_id,
+            True,  # convert units
+            {"sum"},
+        )
+
+        if not stats or statistic_id not in stats or not stats[statistic_id]:
+            return 0.0
+
+        last = stats[statistic_id][-1]
+        # Optional: only use it if it is really before our start
+        return float(last.get("sum") or 0.0)

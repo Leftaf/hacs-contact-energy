@@ -25,6 +25,10 @@ from homeassistant.const import CONF_PASSWORD, UnitOfEnergy
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.recorder import get_instance
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    statistics_during_period,
+)
 
 from .api import ContactEnergyApi
 from .const import (
@@ -399,7 +403,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         self._write_statistics(kwh_statistics or [], free_kwh_statistics or [])
         self.async_write_ha_state()
-        
+
         _LOGGER.info("Manual import finished: %s → %s", start_date, end)
 
     # ------------------------------------------------------------------
@@ -429,22 +433,33 @@ class ContactEnergyUsageSensor(SensorEntity):
     # ------------------------------------------------------------------
 
     async def _async_get_last_sum(self, statistic_id: str, before: date) -> float:
-        """Return the last known sum for statistic_id before the given date."""
-        # Look at the hour just before the start of the requested range
-        end = dt_util.start_of_local_day(before)  # midnight of start_date
+        """Return the sum of the last statistic hour before local midnight of `before`."""
+        start_of_day = dt_util.start_of_local_day(before)
+        # Look a couple of days back so we definitely find a point
+        window_start = start_of_day - timedelta(days=3)
 
         stats = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics,
+            statistics_during_period,
             self.hass,
-            1,  # only need the latest one
-            statistic_id,
-            True,  # convert units
+            window_start,
+            start_of_day,
+            {statistic_id},
+            "hour",
+            None,
             {"sum"},
         )
 
         if not stats or statistic_id not in stats or not stats[statistic_id]:
+            _LOGGER.warning("No prior statistics for %s before %s – seeding with 0", statistic_id, before)
             return 0.0
 
-        last = stats[statistic_id][-1]
-        # Optional: only use it if it is really before our start
-        return float(last.get("sum") or 0.0)
+        last = stats[statistic_id][-1]   # last hour before start_of_day
+        seed = float(last.get("sum") or 0.0)
+        _LOGGER.info(
+            "Seed for %s before %s = %.3f (from %s)",
+            statistic_id,
+            before,
+            seed,
+            last.get("start"),
+        )
+        return seed

@@ -61,6 +61,18 @@ class ContactEnergyApi:
                 _LOGGER.error("Login response missing token")
                 return False
 
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                try:
+                    debug_file = Path("login_debug.json")
+                    debug_file.write_text(response.text, encoding="utf-8")
+                    _LOGGER.debug(
+                        "Full login response saved to file: %s",
+                        debug_file.absolute(),
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Failed to write full login response to debug file"
+                    )
             _LOGGER.debug("Logged in successfully")
             return self.refresh_session()
 

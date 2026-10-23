@@ -156,6 +156,20 @@ class ContactEnergyApi:
                 self._account_id,
                 self._contract_id,
             )
+            
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                try:
+                    debug_file = Path("accounts_debug.json")
+                    debug_file.write_text(response.text, encoding="utf-8")
+                    _LOGGER.debug(
+                        "Full accounts response saved to file: %s",
+                        debug_file.absolute(),
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Failed to write full accounts response to debug file"
+                    )
+
             _LOGGER.debug("Retrieved accounts")
             return True
 

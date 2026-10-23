@@ -40,6 +40,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "history_imported": entry.data.get("history_imported", False),
         "sensor": None,
+        "cost_sensor": None,
+        "cost_by_hour": dict(entry.data.get("cost_by_hour") or {}),
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

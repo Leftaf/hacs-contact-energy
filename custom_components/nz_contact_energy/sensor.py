@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
     SENSOR_USAGE_NAME,
+    VERSION,
     default_first_day_history,
 )
 
@@ -78,7 +79,7 @@ async def async_setup_entry(
 
     api = ContactEnergyApi(config[CONF_ACCOUNT_ID], config[CONF_PASSWORD])
 
-    sensor = ContactEnergyUsageSensor(
+    usage = ContactEnergyUsageSensor(
         name=SENSOR_USAGE_NAME,
         api=api,
         first_day_history=config.get(
@@ -90,9 +91,15 @@ async def async_setup_entry(
         refresh_hours=config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
         entry_id=entry.entry_id,
     )
+    cost = ContactEnergyCostSensor(
+        api=api,
+        entry_id=entry.entry_id,
+    )
+    usage.attach_cost_sensor(cost)
 
-    async_add_entities([sensor], update_before_add=False)
-    hass.data[DOMAIN][entry.entry_id]["sensor"] = sensor
+    async_add_entities([usage], update_before_add=False)
+    hass.data[DOMAIN][entry.entry_id]["sensor"] = usage
+    hass.data[DOMAIN][entry.entry_id]["cost_sensor"] = cost
 
 
 class ContactEnergyUsageSensor(SensorEntity):
@@ -134,8 +141,45 @@ class ContactEnergyUsageSensor(SensorEntity):
             serial_number=str(self._api._contract_id),
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://github.com/Leftaf/hacs-contact-energy",
-            sw_version="1.0.1",
+            sw_version=VERSION,
         )
+
+    def attach_cost_sensor(self, cost_sensor: ContactEnergyCostSensor) -> None:
+        """Link the monetary cost sensor updated during usage fetches."""
+        self._cost_sensor = cost_sensor
+
+    def _merge_hour_costs_and_update_sensor(self) -> None:
+        """Merge per-hour NZD totals from the last fetch into the cost sensor.
+
+        Keys are hour timestamps (ISO). Re-importing the same hour replaces
+        that hour's cost (no double-count). Hour-level storage is required
+        for time-of-use / peak vs off-peak tariffs.
+        """
+        if not self._pending_hour_costs:
+            return
+
+        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+        cost_by_hour: dict[str, float] = store.setdefault("cost_by_hour", {})
+        # Migrate legacy per-day map once (cannot split day → hours)
+        if not cost_by_hour and store.get("cost_by_day"):
+            _LOGGER.info(
+                "Migrating cost storage from per-day to per-hour "
+                "(legacy day totals discarded; re-import history to rebuild)"
+            )
+            store.pop("cost_by_day", None)
+
+        cost_by_hour.update(self._pending_hour_costs)
+        self._pending_hour_costs = {}
+        total = round(sum(cost_by_hour.values()), 2)
+        self._last_cost_total = total
+        if self._cost_sensor is not None:
+            self._cost_sensor.set_total(total)
+
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
+        if entry is not None:
+            new_data = {**entry.data, "cost_by_hour": cost_by_hour}
+            new_data.pop("cost_by_day", None)
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -826,3 +870,50 @@ class ContactEnergyUsageSensor(SensorEntity):
             after_day,
             offset,
         )
+
+class ContactEnergyCostSensor(SensorEntity):
+    """Running total of electricity cost (NZD) from Contact hourly dollarValue.
+
+    Use this entity in the Energy dashboard under
+    **Grid consumption → Cost tracking → Use an entity tracking the total costs**.
+    """
+
+    _attr_should_poll = False
+    _attr_icon = "mdi:currency-usd"
+    _attr_native_value = 0.0
+    _attr_native_unit_of_measurement = "NZD"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_has_entity_name = True
+    _attr_name = "Cost"
+
+    def __init__(self, api: ContactEnergyApi, entry_id: str) -> None:
+        """Initialise the cost sensor (no I/O)."""
+        self._api = api
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{DOMAIN}_cost"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name=f"Account {self._api._account_id}",
+            manufacturer="Home Assistant Community",
+            model=f"Contract {self._api._contract_id}",
+            serial_number=str(self._api._contract_id),
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://github.com/Leftaf/hacs-contact-energy",
+            sw_version=VERSION,
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Restore cumulative cost from persisted per-day totals."""
+        store = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
+        cost_by_hour = store.get("cost_by_hour") or {}
+        if cost_by_hour:
+            self._attr_native_value = round(
+                sum(float(v) for v in cost_by_hour.values()), 2
+            )
+
+    def set_total(self, total: float) -> None:
+        """Update the cumulative cost total and push state to Home Assistant."""
+        self._attr_native_value = round(float(total), 2)
+        if self.hass is not None:
+            self.async_write_ha_state()

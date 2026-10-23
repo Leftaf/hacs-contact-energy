@@ -305,9 +305,29 @@ class ContactEnergyUsageSensor(SensorEntity):
                 response = self._api.get_usage(day.year, day.month, day.day)
                 # Contact's unofficial API is rate-sensitive
                 time.sleep(1.5)
+                # get_usage returns:
+                #   list  → success (may be empty = no data for that day)
+                #   None  → HTTP/API error (502, auth, network, …)
+                if response is None:
+                    # Hard failure — abort so we never write a broken sum chain
+                    _LOGGER.error(
+                        "API error for %s — aborting fetch. "
+                        "No statistics will be written for this run. "
+                        "Retry import_usage later when Contact is available.",
+                        day,
+                    )
+                    return None, None
 
-                if not response or not isinstance(response, list):
-                    _LOGGER.warning("No usable data for %s", day)
+                if not isinstance(response, list):
+                    _LOGGER.error(
+                        "Unexpected response type for %s: %s — aborting fetch",
+                        day,
+                        type(response).__name__,
+                    )
+                    return None, None
+
+                if not response:
+                    _LOGGER.warning("No usable data for %s (empty response)", day)
                     day += timedelta(days=1)
                     continue
 
@@ -458,14 +478,12 @@ class ContactEnergyUsageSensor(SensorEntity):
           caller is responsible for continuity.
         """
         if end_date is None:
-            # Single day (or open-ended) request → extend through yesterday
-            # so the running sum stays continuous with everything after it.
-            end = dt_util.now().date() - timedelta(days=1)
+            # Single day only — do not pull the whole history again
+            end = start_date
             _LOGGER.info(
-                "No end_date given – extending import from %s through %s "
-                "to keep the running sum continuous",
+                "No end_date given – importing single day %s, "
+                "then recalculating sums through yesterday",
                 start_date,
-                end,
             )
         else:
             end = end_date

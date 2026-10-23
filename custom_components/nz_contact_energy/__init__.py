@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 SERVICE_IMPORT_USAGE = "import_usage"
+SERVICE_RECALCULATE_SUMS = "recalculate_sums"
 
 SERVICE_IMPORT_SCHEMA = vol.Schema(
     {
@@ -26,7 +27,12 @@ SERVICE_IMPORT_SCHEMA = vol.Schema(
         vol.Optional("end_date"): cv.date,
     }
 )
-
+SERVICE_RECALCULATE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("start_date"): cv.date,
+        vol.Optional("end_date"): cv.date,
+    }
+)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up NZ Contact Energy from a config entry."""
@@ -54,11 +60,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             _LOGGER.error("No Contact Energy sensor available for import_usage")
 
+        async def async_recalculate_sums(call: ServiceCall) -> None:
+            """Rebuild cumulative sums from existing statistics (no API calls)."""
+            start: date | None = call.data.get("start_date")
+            end: date | None = call.data.get("end_date")
+
+            for _entry_id, store in hass.data.get(DOMAIN, {}).items():
+                sensor = store.get("sensor")
+                if sensor is not None:
+                    await sensor.async_recalculate_sums(start, end)
+                    return
+
+            _LOGGER.error("No Contact Energy sensor available for recalculate_sums")
+
         hass.services.async_register(
             DOMAIN,
             SERVICE_IMPORT_USAGE,
             async_import_usage,
             schema=SERVICE_IMPORT_SCHEMA,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_RECALCULATE_SUMS,
+            async_recalculate_sums,
+            schema=SERVICE_RECALCULATE_SCHEMA,
         )
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

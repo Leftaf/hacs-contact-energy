@@ -14,3 +14,24 @@ import_usage:
       required: false
       selector:
         date:
+
+recalculate_sums:
+  name: Recalculate cumulative sums
+  description: >
+    Rebuild continuous cumulative sums from statistics already stored in
+    Home Assistant. Does not call Contact. Use after partial imports or
+    negative spikes on the Energy Dashboard. Negative hour-to-hour jumps
+    are dropped; missing hours are not invented.
+  fields:
+    start_date:
+      name: Start date
+      description: First day to recalculate (default first_day_history)
+      required: false
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Last day to recalculate (default yesterday)
+      required: false
+      selector:
+        date:

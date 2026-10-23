@@ -29,7 +29,7 @@ SERVICE_IMPORT_SCHEMA = vol.Schema(
 )
 SERVICE_RECALCULATE_SCHEMA = vol.Schema(
     {
-        vol.Optional("start_date"): cv.date,
+        vol.Required("start_date"): cv.date,
         vol.Optional("end_date"): cv.date,
     }
 )

@@ -25,13 +25,13 @@ recalculate_sums:
   fields:
     start_date:
       name: Start date
-      description: First day to recalculate (default first_day_history)
-      required: false
+      description: First day to recalculate
+      required: true
       selector:
         date:
     end_date:
       name: End date
-      description: Last day to recalculate (default yesterday)
+      description: Last day to recalculate
       required: false
       selector:
         date:

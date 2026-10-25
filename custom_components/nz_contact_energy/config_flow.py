@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 
 from .api import ContactEnergyApi
 from .const import (
@@ -33,13 +33,14 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_FIRST_DAY_HISTORY,
             default=default_first_day_history(),
-        ): str,  # "YYYY-MM-DD"
+        ): str,
         vol.Optional(
             CONF_DELTA_NO_DATA_DAYS,
-            default=DEFAULT_DELTA_NO_DATA_DAYS
+            default=DEFAULT_DELTA_NO_DATA_DAYS,
         ): cv.positive_int,
         vol.Optional(
-            CONF_REFRESH_INTERVAL, default=DEFAULT_REFRESH_INTERVAL
+            CONF_REFRESH_INTERVAL,
+            default=DEFAULT_REFRESH_INTERVAL,
         ): cv.positive_int,
     }
 )
@@ -68,7 +69,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None):
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Handle the initial step where the user enters credentials."""
         errors: dict[str, str] = {}
 
@@ -101,12 +104,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for NZ Contact Energy."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Prefer current options, fall back to original config data
         options = self.config_entry.options
         data = self.config_entry.data
 
@@ -114,22 +118,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                vol.Optional(
-                    CONF_DELTA_NO_DATA_DAYS,
-                    default=options.get(
+                    vol.Optional(
                         CONF_DELTA_NO_DATA_DAYS,
-                        data.get(
-                            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
+                        default=options.get(
+                            CONF_DELTA_NO_DATA_DAYS,
+                            data.get(
+                                CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
+                            ),
                         ),
-                    ),
-                ): cv.positive_int,
-                vol.Optional(
-                    CONF_REFRESH_INTERVAL,
-                    default=options.get(
+                    ): cv.positive_int,
+                    vol.Optional(
                         CONF_REFRESH_INTERVAL,
-                        data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
-                    ),
-                ): cv.positive_int,
+                        default=options.get(
+                            CONF_REFRESH_INTERVAL,
+                            data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+                        ),
+                    ): cv.positive_int,
                 }
             ),
         )

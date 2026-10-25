@@ -1,5 +1,4 @@
-"""
-NZ Contact Energy sensors.
+"""NZ Contact Energy sensors.
 
 Fetches hourly electricity usage from Contact Energy (NZ) and writes it into
 Home Assistant long-term statistics so the Energy Dashboard can display it.
@@ -25,16 +24,28 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 
-from homeassistant.components.recorder.models import (
-    StatisticData,
-    StatisticMeanType,
-    StatisticMetaData,
-)
+try:
+    from homeassistant.components.recorder.models import (
+        StatisticData,
+        StatisticMeanType,
+        StatisticMetaData,
+    )
+except ImportError:  # pragma: no cover - older / split package layouts
+    from homeassistant.components.recorder.models.statistics import (  # type: ignore[no-redef]
+        StatisticData,
+        StatisticMeanType,
+        StatisticMetaData,
+    )
+
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
-    async_import_statistics,
     statistics_during_period,
 )
+
+try:
+    from homeassistant.components.recorder.statistics import async_import_statistics
+except ImportError:  # pragma: no cover
+    async_import_statistics = None  # type: ignore[assignment]
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -48,6 +59,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import ContactEnergyApi
 from .const import (
+    VERSION,
     CONF_ACCOUNT_ID,
     CONF_DELTA_NO_DATA_DAYS,
     CONF_FIRST_DAY_HISTORY,
@@ -57,7 +69,6 @@ from .const import (
     DOMAIN,
     SENSOR_COST_NAME,
     SENSOR_USAGE_NAME,
-    VERSION,
     default_first_day_history,
 )
 
@@ -150,8 +161,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._cost_sensor = cost_sensor
 
     def _merge_hour_costs_and_update_sensor(self) -> None:
-        """
-        Merge per-hour NZD costs from the last fetch; persist; update cost entity.
+        """Merge per-hour NZD costs from the last fetch; persist; update cost entity.
 
         Keys are hour timestamps (ISO). Re-import replaces that hour (no double-count).
         Hour-level storage supports peak / off-peak / night tariffs.
@@ -264,8 +274,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         free_seed: float = 0.0,
         cost_seed: float = 0.0,
     ) -> tuple[list[StatisticData] | None, list[StatisticData] | None]:
-        """
-        Fetch usage and build StatisticData points.
+        """Fetch usage and build StatisticData points.
 
         Blocking — call via ``hass.async_add_executor_job``.
 
@@ -276,7 +285,6 @@ class ContactEnergyUsageSensor(SensorEntity):
         (None, None)
             On login failure **or** any day-level API error.  Callers must
             **not** write statistics in that case.
-
         """
         if start_date is not None:
             start = start_date
@@ -451,6 +459,7 @@ class ContactEnergyUsageSensor(SensorEntity):
             # Also import onto the cost *entity* statistic_id so the Energy
             # dashboard "entity tracking total costs" option sees the same hours
             if self._cost_sensor is not None and self._cost_sensor.entity_id:
+                # cast(): Pylance HA stubs lag core StatisticMetaData (mean_type/unit_class)
                 entity_meta = cast(
                     StatisticMetaData,
                     {
@@ -463,13 +472,14 @@ class ContactEnergyUsageSensor(SensorEntity):
                         "unit_class": None,
                     },
                 )
-                try:
-                    async_import_statistics(self.hass, entity_meta, cost_statistics)
-                except Exception:
-                    _LOGGER.exception(
-                        "Failed to import cost statistics for %s",
-                        self._cost_sensor.entity_id,
-                    )
+                if async_import_statistics is not None:
+                    try:
+                        async_import_statistics(self.hass, entity_meta, cost_statistics)
+                    except Exception:
+                        _LOGGER.exception(
+                            "Failed to import cost statistics for %s",
+                            self._cost_sensor.entity_id,
+                        )
 
     def _mark_history_imported(self) -> None:
         """Persist history_imported so restarts skip the full back-fill."""
@@ -531,8 +541,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         start_date: date,
         end_date: date | None = None,
     ) -> None:
-        """
-        Fetch and insert statistics for an explicit date range.
+        """Fetch and insert statistics for an explicit date range.
 
         * Only ``start_date`` → import **that single day**.
         * ``start_date`` + ``end_date`` → import exactly that range.
@@ -574,8 +583,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> None:
-        """
-        Rebuild cumulative sums from existing recorder statistics.
+        """Rebuild cumulative sums from existing recorder statistics.
 
         Does **not** call Contact.  Reads hourly points already stored, derives
         non-negative deltas between consecutive hours, and rewrites a continuous
@@ -723,8 +731,7 @@ class ContactEnergyUsageSensor(SensorEntity):
     # ------------------------------------------------------------------
 
     async def async_update(self) -> None:
-        """
-        Short update: lag window only.
+        """Short update: lag window only.
 
         Seeds from the day before the window; after writing, shifts any days
         after the window (normally none, because the window ends yesterday).
@@ -748,8 +755,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         start: date,
         end: date,
     ) -> bool:
-        """
-        Seed from day before, fetch ``start``…``end``, write, shift days after.
+        """Seed from day before, fetch ``start``…``end``, write, shift days after.
 
         Returns True if statistics were written, False on abort (API error).
         """
@@ -806,9 +812,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         yesterday = dt_util.now().date() - timedelta(days=1)
         if yesterday > end and (
-            abs(kwh_offset) > 1e-6
-            or abs(free_offset) > 1e-6
-            or abs(cost_offset) > 1e-6
+            abs(kwh_offset) > 1e-6 or abs(free_offset) > 1e-6 or abs(cost_offset) > 1e-6
         ):
             _LOGGER.info(
                 "Shifting sums after %s through %s "
@@ -905,8 +909,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         end_date: date,
         offset: float,
     ) -> None:
-        """
-        Add *offset* to every hourly sum after *after_day* through *end_date*.
+        """Add *offset* to every hourly sum after *after_day* through *end_date*.
 
         Preserves hour-to-hour deltas on later days; only moves the baseline
         so they connect to a rewritten earlier range.
@@ -962,8 +965,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
 
 class ContactEnergyCostSensor(SensorEntity):
-    """
-    Running total of electricity cost (NZD) from Contact hourly dollarValue.
+    """Running total of electricity cost (NZD) from Contact hourly dollarValue.
 
     Use in the Energy dashboard under
     **Grid consumption → Cost tracking → Use an entity tracking the total costs**.

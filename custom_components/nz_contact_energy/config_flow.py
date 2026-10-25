@@ -42,7 +42,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
             CONF_REFRESH_INTERVAL,
             default=DEFAULT_REFRESH_INTERVAL,
         ): cv.positive_int,
-    }
+    },
 )
 
 
@@ -70,7 +70,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Handle the initial step where the user enters credentials."""
         errors: dict[str, str] = {}
@@ -95,7 +95,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
+        _config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
         return OptionsFlowHandler()
@@ -105,7 +105,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for NZ Contact Energy."""
 
     async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
+        self, user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
@@ -123,8 +123,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         default=options.get(
                             CONF_DELTA_NO_DATA_DAYS,
                             data.get(
-                                CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
-                            ),
+                                CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS),
                         ),
                     ): cv.positive_int,
                     vol.Optional(
@@ -134,7 +133,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
                         ),
                     ): cv.positive_int,
-                }
+                },
             ),
         )
 

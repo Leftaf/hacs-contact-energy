@@ -10,7 +10,7 @@ import_usage:
         date:
     end_date:
       name: End date
-      description: Last day to import (optional – leave empty for a single day)
+      description: Last day to import (optional - leave empty for a single day)
       required: false
       selector:
         date:
@@ -32,7 +32,7 @@ recalculate_sums:
         date:
     end_date:
       name: End date
-      description: Last day to recalculate (optional – leave empty for a single day)
+      description: Last day to recalculate (optional - leave empty for a single day)
       required: false
       selector:
         date:

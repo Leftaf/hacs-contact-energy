@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from typing import TYPE_CHECKING
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
+
+if TYPE_CHECKING:
+    from datetime import date
+
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant, ServiceCall
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,13 +28,13 @@ SERVICE_IMPORT_SCHEMA = vol.Schema(
     {
         vol.Required("start_date"): cv.date,
         vol.Optional("end_date"): cv.date,
-    }
+    },
 )
 SERVICE_RECALCULATE_SCHEMA = vol.Schema(
     {
         vol.Required("start_date"): cv.date,
         vol.Optional("end_date"): cv.date,
-    }
+    },
 )
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

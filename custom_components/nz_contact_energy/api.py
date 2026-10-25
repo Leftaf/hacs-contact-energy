@@ -71,8 +71,7 @@ class ContactEnergyApi:
                     )
                 except Exception:
                     _LOGGER.exception(
-                        "Failed to write full login response to debug file"
-                    )
+                        "Failed to write full login response to debug file")
             _LOGGER.debug("Logged in successfully")
             return self.refresh_session()
 
@@ -167,8 +166,7 @@ class ContactEnergyApi:
                     )
                 except Exception:
                     _LOGGER.exception(
-                        "Failed to write full accounts response to debug file"
-                    )
+                        "Failed to write full accounts response to debug file")
 
             _LOGGER.debug("Retrieved accounts")
             return True
@@ -182,10 +180,9 @@ class ContactEnergyApi:
     # ------------------------------------------------------------------
 
     def get_usage(
-        self, year: int | str, month: int | str, day: int | str
+        self, year: int | str, month: int | str, day: int | str,
     ) -> Any | None:
-        """
-        Fetch hourly usage for a single calendar day.
+        """Fetch hourly usage for a single calendar day.
 
         Returns:
             list of hour dicts on success (may be empty),
@@ -235,12 +232,10 @@ class ContactEnergyApi:
                     debug_file = Path(f"usage_debug_{date_label}.json")
                     debug_file.write_text(response.text, encoding="utf-8")
                     _LOGGER.debug(
-                        "Full usage response saved to file: %s", debug_file.absolute()
-                    )
+                        "Full usage response saved to file: %s", debug_file.absolute())
                 except Exception:
                     _LOGGER.exception(
-                        "Failed to write full usage response to debug file"
-                    )
+                        "Failed to write full usage response to debug file")
 
             if response.status_code == requests.codes.ok:
                 data = response.json()

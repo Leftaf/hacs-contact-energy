@@ -1,7 +1,7 @@
 # Ruff config for NZ Contact Energy (custom HA integration)
 # Keep rules that catch real bugs; silence HA-typical / complexity noise.
 
-line-length = 88
+line-length = 90
 target-version = "py314"
 
 [lint]

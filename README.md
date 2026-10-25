@@ -67,11 +67,40 @@ After setup you can change the lag window and refresh interval via the integrati
 
 | Name | Type | Description |
 |------|------|-------------|
-| `sensor.nz_contact_energy_consumption` | Sensor (Energy / Total Increasing) | Current total consumption sensor |
+| Name | Type | Description |
+|------|------|-------------|
+| `sensor.nz_contact_energy_consumption` | Sensor (Energy / Total Increasing) | Running total consumption (kWh) |
+| `sensor.nz_contact_energy_cost` | Sensor (Monetary / Total, NZD) | Running total cost **(excl. GST)** from hourly `dollarValue` |
 | External statistics | `nz_contact_energy:energy_consumption` | Hourly statistics for the Energy Dashboard |
 | External statistics | `nz_contact_energy:free_energy_consumption` | Free / controlled-period energy (when available) |
 
 The integration uses Contact’s unofficial API. Data is typically available with a 1–2 day lag.
+
+---
+
+### Cost tracking (Energy dashboard)
+
+Contact returns a **cost per hour** (`dollarValue` in NZD). The integration stores those values **per hour** (so peak / off-peak / night tariffs stay correct) and exposes a cumulative total on `sensor.nz_contact_energy_cost` (**excl. GST**, matching Contact bill lines before GST).
+
+**Setup:**
+
+1. Open **Settings → Dashboards → Energy → Grid consumption → Configure**
+2. Under **Cost tracking**, choose **Use an entity tracking the total costs**
+3. Select **`sensor.nz_contact_energy_cost`**
+
+**Notes:**
+
+- Cost is stored as **hourly statistics** with the **same timestamps** as kWh (so Energy days line up)
+- Re-importing the same hour replaces that hour’s cost (no double-counting)
+- After a full history import (or `import_usage` from your start date), the cost sensor total matches the sum of all stored hours
+- If cost shows on the wrong day (or NZ$0.00 while kWh is fine), re-import that range once so cost statistics are rewritten:
+
+```yaml
+action: nz_contact_energy.import_usage
+data:
+  start_date: "2026-10-23"
+  end_date: "2026-10-24"
+```
 
 ---
 
@@ -84,7 +113,7 @@ Use the built-in **import_usage** service to re-fetch and rewrite any past range
 
 ### How to call it
 
-**Developer Tools → Actions**
+**Tools → Actions**
 
 ```yaml
 action: nz_contact_energy.import_usage
@@ -151,10 +180,12 @@ Re-importing the same range is safe — existing statistics for those hours are 
 
 - Requires a valid Contact Energy account (email + password)
 - Uses an unofficial API – Contact may change or rate-limit it at any time
-- No cost / tariff data is imported (only kWh consumption)
-- Free / controlled-period energy (if present on your plan) is recorded separately when available
+- Cost is imported from hourly `dollarValue` (NZD, excl. GST) via sensor.`nz_contact_energy_cost`
+- The cost are stored per-hour for time-of-use tariffs (peak / off-peak / night)
+- Free / controlled-period energy (if present on your plan) is recorded separately when available add `Free NZ Contact Energy Consumption` to the **Grid connections**
 - Contact data often lags by 1–2 days; the lag window setting covers normal delays
 - Long date ranges are fetched day-by-day with a short pause to avoid rate limiting
+- Multiple contracts on one account are not tested. The integration uses the first countract with status: ACTIVE (otherwise the first contract). If you have several active contracts (e.g. electricity + gas), behaviour is untested — please report samples via GitHub Issues
 
 ---
 

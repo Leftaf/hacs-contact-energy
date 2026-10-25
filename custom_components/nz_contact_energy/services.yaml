@@ -4,7 +4,7 @@ import_usage:
   fields:
     start_date:
       name: Start date
-      description: First day to import (YYYY-MM-DD)
+      description: First day to import
       required: true
       selector:
         date:
@@ -18,10 +18,11 @@ import_usage:
 recalculate_sums:
   name: Recalculate cumulative sums
   description: >
-    Rebuild continuous cumulative sums from statistics already stored in
-    Home Assistant. Does not call Contact. Use after partial imports or
-    negative spikes on the Energy Dashboard. Negative hour-to-hour jumps
-    are dropped; missing hours are not invented.
+    Rebuild continuous cumulative sums for kWh, free kWh, and cost from
+    statistics already stored in Home Assistant. Does not call Contact.
+    Seeds from the day before the range and shifts days after so the
+    Energy Dashboard stays continuous. Use after partial imports or
+    negative spikes (energy or NZ$). Missing hours are not invented.
   fields:
     start_date:
       name: Start date
@@ -31,7 +32,7 @@ recalculate_sums:
         date:
     end_date:
       name: End date
-      description: Last day to recalculate
+      description: Last day to recalculate (optional – leave empty for a single day)
       required: false
       selector:
         date:

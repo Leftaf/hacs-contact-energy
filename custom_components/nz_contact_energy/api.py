@@ -110,7 +110,7 @@ class ContactEnergyApi:
             return False
 
     def get_accounts(self) -> bool:
-        """Load first account and prefer electricity contract (contractType 1)."""
+        """Load account details and contract details."""
         headers = {
             "x-api-key": self._api_key,
             "session": self._api_session,
@@ -138,9 +138,9 @@ class ContactEnergyApi:
                 _LOGGER.error("No contracts found for customer account")
                 return False
 
-            # Prefer electricity; fall back to first contract
+            # If we have multiple contracts, prefer the one with status "ACTIVE"
             electricity = next(
-                (c for c in contracts if str(c.get("contractType", "")) == "1"),
+                (c for c in contracts if str(c.get("status", "")).upper() == "ACTIVE"),
                 contracts[0],
             )
 

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-import voluptuous as vol
-
 from datetime import date
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -67,6 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             start: date | None = call.data.get("start_date")
             end: date | None = call.data.get("end_date")
 
+            # Use the first (usually only) configured entry
             for _entry_id, store in hass.data.get(DOMAIN, {}).items():
                 sensor = store.get("sensor")
                 if sensor is not None:

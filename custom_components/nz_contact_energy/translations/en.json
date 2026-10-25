@@ -10,15 +10,15 @@
                     "first_day_history": "First day of historical import",
                     "delta_no_data_days": "Days to re-fetch (lag window)",
                     "refresh_interval": "Default Refresh Interval (hours)"
+                },
+                "data_description": {
+                    "account_id": "The email address you use to log into the Contact Energy app / My Account",
+                    "password": "Your Contact Energy account password",
+                    "first_day_history": "The first day of historical data to import",
+                    "delta_no_data_days": "On each update, re-request this many days before today (Contact data often lags). Default: 2.",
+                    "refresh_interval": "How often to poll Contact for new data (hours). Default: 24."
                 }
             }
-        },
-        "data_description": {
-            "account_id": "The email address you use to log into the Contact Energy app / My Account",
-            "password": "Your Contact Energy account password",
-            "first_day_history": "The first day of historical data to import",
-            "delta_no_data_days": "Delta Days where no data are provided.",
-            "refresh_interval": "On each update, re-request this many days before today (Contact data often lags). Default: 2."
         },
         "error": {
             "invalid_auth": "Invalid account ID or password.",
@@ -34,10 +34,10 @@
                 "title": "NZ Contact Energy options",
                 "data": {
                     "refresh_interval": "Refresh interval (hours)",
-                    "delta_no_data_days": "Delta Days where no data are provided."
+                    "delta_no_data_days": "Days to re-fetch (lag window)"
                 },
                 "data_description": {
-                    "refresh_interval": "As Data are only provided once each night, this is the interval between updates. Default: 24 hours.",
+                    "refresh_interval": "As data are only provided once each night, this is the interval between updates. Default: 24 hours.",
                     "delta_no_data_days": "On each update, re-request this many days before today (Contact data often lags)."
                 }
             }

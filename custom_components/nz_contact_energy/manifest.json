@@ -5,6 +5,9 @@
     "@Leftaf"
   ],
   "config_flow": true,
+  "after_dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/Leftaf/hacs-contact-energy/",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Leftaf/hacs-contact-energy/issues",

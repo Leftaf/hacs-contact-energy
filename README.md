@@ -67,8 +67,6 @@ After setup you can change the lag window and refresh interval via the integrati
 
 | Name | Type | Description |
 |------|------|-------------|
-| Name | Type | Description |
-|------|------|-------------|
 | `sensor.nz_contact_energy_consumption` | Sensor (Energy / Total Increasing) | Running total consumption (kWh) |
 | `sensor.nz_contact_energy_cost` | Sensor (Monetary / Total, NZD) | Running total cost **(excl. GST)** from hourly `dollarValue` |
 | External statistics | `nz_contact_energy:energy_consumption` | Hourly statistics for the Energy Dashboard |

@@ -24,5 +24,5 @@ keep-runtime-typing = true
 [lint.mccabe]
 max-complexity = 25
 
-[tool.ruff.lint.pylint]
-max-args = 8   # or 7, 10… whatever feels reasonable
+[lint.pylint]
+max-args = 8

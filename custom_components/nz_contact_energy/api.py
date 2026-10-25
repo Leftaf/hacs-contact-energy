@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -156,7 +156,7 @@ class ContactEnergyApi:
                 self._account_id,
                 self._contract_id,
             )
-            
+
             if _LOGGER.isEnabledFor(logging.DEBUG):
                 try:
                     debug_file = Path("accounts_debug.json")
@@ -184,11 +184,13 @@ class ContactEnergyApi:
     def get_usage(
         self, year: int | str, month: int | str, day: int | str
     ) -> Any | None:
-        """Fetch hourly usage for a single calendar day.
+        """
+        Fetch hourly usage for a single calendar day.
 
         Returns:
             list of hour dicts on success (may be empty),
             None on error / auth failure.
+
         """
         year_s = str(year)
         month_s = str(month).zfill(2)

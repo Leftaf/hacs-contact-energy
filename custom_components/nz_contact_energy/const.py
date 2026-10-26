@@ -36,7 +36,7 @@ DOMAIN = "nz_contact_energy"
 VERSION = _load_version()
 
 CONF_ACCOUNT_ID = "account_id"
-CONF_PASSWORD = "password"
+CONF_PASSWORD = "password"  # noqa: S105 noted
 CONF_REFRESH_INTERVAL = "refresh_interval"
 CONF_FIRST_DAY_HISTORY = "first_day_history"  # "YYYY-MM-DD"
 CONF_DELTA_NO_DATA_DAYS = "delta_no_data_days"  # int

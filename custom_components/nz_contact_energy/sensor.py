@@ -55,7 +55,8 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import CONF_PASSWORD, UnitOfEnergy
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.util import dt as dt_util
 
@@ -65,13 +66,17 @@ from .const import (
     CONF_DELTA_NO_DATA_DAYS,
     CONF_FIRST_DAY_HISTORY,
     CONF_REFRESH_INTERVAL,
+    CONF_REFRESH_START_TIME,
     DEFAULT_DELTA_NO_DATA_DAYS,
     DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_REFRESH_START_TIME,
     DOMAIN,
     SENSOR_COST_NAME,
+    SENSOR_LAST_API_NAME,
     SENSOR_USAGE_NAME,
     VERSION,
     default_first_day_history,
+    parse_refresh_start_time,
 )
 
 if TYPE_CHECKING:
@@ -99,18 +104,26 @@ async def async_setup_entry(
     usage = ContactEnergyUsageSensor(
         api=api,
         first_day_history=config.get(
-            CONF_FIRST_DAY_HISTORY, default_first_day_history()),
+            CONF_FIRST_DAY_HISTORY, default_first_day_history()
+        ),
         delta_no_data_days=config.get(
-            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS),
+            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
+        ),
         refresh_hours=config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+        refresh_start_time=parse_refresh_start_time(
+            config.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
+        ),
         entry_id=entry.entry_id,
     )
     cost = ContactEnergyCostSensor(api=api, entry_id=entry.entry_id)
+    last_api = ContactEnergyLastApiSensor(api=api, entry_id=entry.entry_id)
     usage.attach_cost_sensor(cost)
+    usage.attach_last_api_sensor(last_api)
 
-    async_add_entities([usage, cost], update_before_add=False)
+    async_add_entities([usage, cost, last_api], update_before_add=False)
     hass.data[DOMAIN][entry.entry_id]["sensor"] = usage
     hass.data[DOMAIN][entry.entry_id]["cost_sensor"] = cost
+    hass.data[DOMAIN][entry.entry_id]["last_api_sensor"] = last_api
 
 
 class ContactEnergyUsageSensor(SensorEntity):
@@ -132,6 +145,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         first_day_history: str,
         delta_no_data_days: int,
         refresh_hours: int,
+        refresh_start_time,
         entry_id: str,
     ) -> None:
         """Initialise the sensor (no I/O here)."""
@@ -139,18 +153,20 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._first_day_history = first_day_history
         self._delta_no_data_days = max(1, int(delta_no_data_days))
         self._refresh_hours = max(1, int(refresh_hours))
+        self._refresh_start_time = parse_refresh_start_time(refresh_start_time)
         self._entry_id = entry_id
         self._import_task = None
         self._unsub_interval = None
         self._cost_sensor: ContactEnergyCostSensor | None = None
+        self._last_api_sensor: ContactEnergyLastApiSensor | None = None
         self._pending_hour_costs: dict[str, float] = {}
         self._pending_cost_statistics: list[StatisticData] = []
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
-            name=f"Account {self._api._account_id}",
+            name=f"Account {self._api.account_id}",
             manufacturer="Home Assistant Community",
-            model=f"Contract {self._api._contract_id}",
-            serial_number=str(self._api._contract_id),
+            model=f"Contract {self._api.contract_id}",
+            serial_number=str(self._api.contract_id),
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://github.com/Leftaf/hacs-contact-energy",
             sw_version=VERSION,
@@ -159,6 +175,20 @@ class ContactEnergyUsageSensor(SensorEntity):
     def attach_cost_sensor(self, cost_sensor: ContactEnergyCostSensor) -> None:
         """Link the monetary cost sensor updated during usage fetches."""
         self._cost_sensor = cost_sensor
+
+    def attach_last_api_sensor(self, last_api: ContactEnergyLastApiSensor) -> None:
+        """Link the last-API-success timestamp sensor."""
+        self._last_api_sensor = last_api
+
+    def _notify_api_success(self, detail: str = "") -> None:
+        """Record successful Contact API activity on the timestamp sensor."""
+        if self._last_api_sensor is not None:
+            self._last_api_sensor.set_success(detail)
+
+    def _notify_api_error(self, detail: str = "", status: str | int | None = None) -> None:
+        """Record failed Contact API activity (status OK/code in entity state)."""
+        if self._last_api_sensor is not None:
+            self._last_api_sensor.set_error(detail, status=status)
 
     def _merge_hour_costs_and_update_sensor(self) -> None:
         """Merge per-hour NZD costs from the last fetch; persist; update cost entity.
@@ -179,7 +209,17 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         cost_by_hour.update(self._pending_hour_costs)
         self._pending_hour_costs = {}
-        total = round(sum(cost_by_hour.values()), 2)
+        map_total = round(sum(float(v) for v in cost_by_hour.values()), 2)
+        # Prefer the higher of hour-map sum and current entity value so a
+        # partial lag-window map never pulls the cost entity down and create
+        # a huge negative Energy day on "no data" / update day.
+        current = 0.0
+        if self._cost_sensor is not None and self._cost_sensor.native_value is not None:
+            try:
+                current = float(self._cost_sensor.native_value)
+            except (TypeError, ValueError):
+                current = 0.0
+        total = round(max(map_total, current), 2)
         if self._cost_sensor is not None:
             self._cost_sensor.set_total(total)
 
@@ -193,11 +233,15 @@ class ContactEnergyUsageSensor(SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Extra attributes shown on the entity card."""
         return {
-            "account": self._api._account_id,
-            "contract_id": self._api._contract_id,
+            "account": self._api.account_id,
+            "contract_id": self._api.contract_id,
             "first_day_history": self._first_day_history,
             "delta_no_data_days": self._delta_no_data_days,
             "refresh_interval_hours": self._refresh_hours,
+            "refresh_start_time": self._refresh_start_time.isoformat(
+                timespec="seconds"
+            ),
+            "refresh_at_local_hours": self._refresh_hours_of_day(),
         }
 
     # ------------------------------------------------------------------
@@ -219,14 +263,50 @@ class ContactEnergyUsageSensor(SensorEntity):
         else:
             self.hass.async_create_task(self.async_update_ha_state(force_refresh=True))
 
-        self._unsub_interval = async_track_time_interval(
+        # Poll at refresh_start_time local, then every refresh_interval hours.
+        # Example: 03:00 + 24h → 03:00 only; 03:00 + 12h → 03:00 and 15:00.
+        hours = self._refresh_hours_of_day()
+        minute = self._refresh_start_time.minute
+        second = self._refresh_start_time.second
+        _LOGGER.info(
+            "Scheduling Contact lag-window refresh at local %s (hours=%s, interval=%sh)",
+            self._refresh_start_time.isoformat(timespec="seconds"),
+            hours,
+            self._refresh_hours,
+        )
+        self._unsub_interval = async_track_time_change(
             self.hass,
             self._async_interval_update,
-            timedelta(hours=self._refresh_hours),
+            hour=hours,
+            minute=minute,
+            second=second,
+        )
+
+    @staticmethod
+    def _hours_anchored(interval_hours: int, start_hour: int) -> list[int]:
+        """Return local hours of day for polls: start_hour, +interval, within 24h."""
+        interval = max(1, min(24, int(interval_hours)))
+        start = int(start_hour) % 24
+        hours: list[int] = []
+        hour = start
+        for _ in range(24):
+            if hour not in hours:
+                hours.append(hour)
+            hour = (hour + interval) % 24
+            if hour == start:
+                break
+        return sorted(hours)
+
+    def _refresh_hours_of_day(self) -> list[int]:
+        """Local clock hours when the lag-window fetch should run."""
+        return self._hours_anchored(
+            self._refresh_hours,
+            self._refresh_start_time.hour,
         )
 
     async def _async_interval_update(self, _now=None) -> None:
-        """Timer callback — trigger a real data fetch."""
+        """Clock callback (refresh_start_time + interval) — real data fetch."""
+        _LOGGER.debug("Scheduled Contact refresh fired")
         await self.async_update_ha_state(force_refresh=True)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -294,21 +374,20 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         _LOGGER.debug(
             "token=%s contract=%s account=%s range=%s → %s (full_history=%s)",
-            bool(self._api._api_token),
-            self._api._contract_id,
-            self._api._account_id,
+            self._api.has_session,
+            self._api.contract_id,
+            self._api.account_id,
             start,
             end,
             full_history,
         )
 
-        if not self._api._api_token or not self._api._contract_id:
-            _LOGGER.debug("No valid session - logging in")
-            if not self._api.login():
-                _LOGGER.error("Failed to login - check credentials")
-                return None, None
-        else:
-            _LOGGER.debug("Existing session present - continuing")
+        # Always refresh login before a multi-day fetch. Stale tokens often
+        # still look "valid" (has_session True) but Contact returns 502/401.
+        _LOGGER.debug("Refreshing Contact session before usage fetch")
+        if not self._api.login():
+            _LOGGER.error("Failed to login - check credentials")
+            return None, None
 
         kwh_statistics: list[StatisticData] = []
         free_kwh_statistics: list[StatisticData] = []
@@ -430,6 +509,28 @@ class ContactEnergyUsageSensor(SensorEntity):
                 "unit_class": "energy",
             }
             async_add_external_statistics(self.hass, metadata, kwh_statistics)
+
+            # Mirror onto consumption entity LTS (Energy dashboard entity source)
+            if self.entity_id and async_import_statistics is not None:
+                entity_meta = cast(
+                    "StatisticMetaData",
+                    {
+                        "has_sum": True,
+                        "name": None,
+                        "source": "recorder",
+                        "statistic_id": self.entity_id,
+                        "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+                        "mean_type": StatisticMeanType.NONE,
+                        "unit_class": "energy",
+                    },
+                )
+                try:
+                    async_import_statistics(self.hass, entity_meta, kwh_statistics)
+                except Exception:
+                    _LOGGER.exception(
+                        "Failed to import kWh statistics onto entity %s",
+                        self.entity_id,
+                    )
 
         if free_kwh_statistics:
             metadata = {
@@ -849,16 +950,33 @@ class ContactEnergyUsageSensor(SensorEntity):
             )
             return False
 
+        cost_statistics = list(self._pending_cost_statistics)
+
         self._write_statistics(
             kwh_statistics or [],
             free_kwh_statistics or [],
-            self._pending_cost_statistics,
+            cost_statistics,
         )
         self._pending_cost_statistics = []
         self.async_write_ha_state()
         self._merge_hour_costs_and_update_sensor()
+        # Align cost entity with last written cost running sum (if any)
+        if cost_statistics and self._cost_sensor is not None:
+            last_cost = self._statistic_sum(cost_statistics[-1])
+            try:
+                cur = float(self._cost_sensor.native_value or 0)
+            except (TypeError, ValueError):
+                cur = 0.0
+            if last_cost > cur + 1e-6:
+                self._cost_sensor.set_total(round(last_cost, 2))
+        self._notify_api_success(f"{start} -> {end}")
 
         # --- After: shift later days by (new_end - old_end) ---
+        # Use *in-memory* end sums from this fetch — not a recorder re-read.
+        # Reading the DB immediately after async_add_external_statistics can
+        # still return the *old* end sum, so cost_offset becomes 0 and later
+        # days (e.g. June after a Mar–May import) stay unshifted → large
+        # negative Energy day totals.
         new_kwh_end = (
             self._statistic_sum(kwh_statistics[-1]) if kwh_statistics else old_kwh_end
         )
@@ -867,10 +985,24 @@ class ContactEnergyUsageSensor(SensorEntity):
             if free_kwh_statistics
             else old_free_end
         )
-        new_cost_end = await self._async_get_cost_sum_at_end_of_day(end)
+        new_cost_end = (
+            self._statistic_sum(cost_statistics[-1]) if cost_statistics else old_cost_end
+        )
         kwh_offset = new_kwh_end - old_kwh_end
         free_offset = new_free_end - old_free_end
         cost_offset = new_cost_end - old_cost_end
+        _LOGGER.debug(
+            "Import range %s → %s end sums: kwh %.3f→%.3f (offset %+.3f), "
+            "cost %.3f→%.3f (offset %+.3f)",
+            start,
+            end,
+            old_kwh_end,
+            new_kwh_end,
+            kwh_offset,
+            old_cost_end,
+            new_cost_end,
+            cost_offset,
+        )
 
         yesterday = dt_util.now().date() - timedelta(days=1)
         if yesterday > end and (
@@ -889,6 +1021,11 @@ class ContactEnergyUsageSensor(SensorEntity):
                 await self._async_shift_sums_after(
                     STATISTIC_ID, end, yesterday, kwh_offset,
                 )
+                # Entity LTS (Energy dashboard when source is the sensor)
+                if self.entity_id:
+                    await self._async_shift_sums_after(
+                        self.entity_id, end, yesterday, kwh_offset,
+                    )
             if abs(free_offset) > 1e-6:
                 await self._async_shift_sums_after(
                     FREE_STATISTIC_ID, end, yesterday, free_offset,
@@ -936,7 +1073,7 @@ class ContactEnergyUsageSensor(SensorEntity):
                     dt = dt.replace(tzinfo=before_start.tzinfo)
                 if dt < before_start:
                     total += float(val)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
         return total
 
@@ -1009,7 +1146,14 @@ class ContactEnergyUsageSensor(SensorEntity):
         return seed
 
     async def _async_get_sum_at_end_of_day(self, statistic_id: str, day: date) -> float:
-        """Return the cumulative sum of the last hour on *day* (local)."""
+        """Return cumulative sum at end of *day* (local).
+
+        Prefer the last hour *on* that day. If Contact has not published the
+        day yet (empty lag day), fall back to the last hour strictly before
+        the next midnight — never return 0 when earlier history exists.
+        Returning 0 for an empty day made import offsets wrong and produced
+        large negative Energy cost on "no data" days.
+        """
         day_start = dt_util.start_of_local_day(day)
         day_end = dt_util.start_of_local_day(day + timedelta(days=1))
 
@@ -1024,10 +1168,31 @@ class ContactEnergyUsageSensor(SensorEntity):
             {"sum"},
         )
 
-        if not stats or statistic_id not in stats or not stats[statistic_id]:
-            return 0.0
+        if stats and statistic_id in stats and stats[statistic_id]:
+            return float(stats[statistic_id][-1].get("sum") or 0.0)
 
-        return float(stats[statistic_id][-1].get("sum") or 0.0)
+        # Empty day (portal lag): use last sum before end of this day
+        lookback_start = day_start - timedelta(days=14)
+        prior = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            lookback_start,
+            day_end,
+            {statistic_id},
+            "hour",
+            None,
+            {"sum"},
+        )
+        if prior and statistic_id in prior and prior[statistic_id]:
+            seed = float(prior[statistic_id][-1].get("sum") or 0.0)
+            _LOGGER.debug(
+                "No stats on %s for %s — using last prior sum %.3f",
+                day,
+                statistic_id,
+                seed,
+            )
+            return seed
+        return 0.0
 
     async def _async_shift_sums_after(
         self,
@@ -1142,10 +1307,10 @@ class ContactEnergyCostSensor(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_cost"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry_id)},
-            name=f"Account {self._api._account_id}",
+            name=f"Account {self._api.account_id}",
             manufacturer="Home Assistant Community",
-            model=f"Contract {self._api._contract_id}",
-            serial_number=str(self._api._contract_id),
+            model=f"Contract {self._api.contract_id}",
+            serial_number=str(self._api.contract_id),
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://github.com/Leftaf/hacs-contact-energy",
             sw_version=VERSION,
@@ -1162,5 +1327,99 @@ class ContactEnergyCostSensor(SensorEntity):
     def set_total(self, total: float) -> None:
         """Update the cumulative cost total and push state to Home Assistant."""
         self._attr_native_value = round(float(total), 2)
+        if self.hass is not None:
+            self.async_write_ha_state()
+
+
+class ContactEnergyLastApiSensor(RestoreEntity, SensorEntity):
+    """Last Contact API call status for Activity / diagnostics.
+
+    State is a short status string (``OK`` or an error code such as ``502``),
+    not a timestamp — so Activity shows useful transitions (e.g. OK → 502).
+    The time of the last successful call is in attributes (and ``short``).
+    """
+
+    _attr_should_poll = False
+    _attr_icon = "mdi:api"
+    _attr_has_entity_name = True
+    _attr_name = SENSOR_LAST_API_NAME
+    _attr_native_value = "unknown"
+
+    def __init__(self, api: ContactEnergyApi, entry_id: str) -> None:
+        """Initialise the last-API status sensor."""
+        self._api = api
+        self._entry_id = entry_id
+        self._last_success: datetime | None = None
+        self._last_error: str | None = None
+        self._last_detail: str = ""
+        self._attr_unique_id = f"{DOMAIN}_last_api_call"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name=f"Account {self._api.account_id}",
+            manufacturer="Home Assistant Community",
+            model=f"Contract {self._api.contract_id}",
+            serial_number=str(self._api.contract_id),
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://github.com/Leftaf/hacs-contact-energy",
+            sw_version=VERSION,
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last status and success time after restart."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is None or last.state in (None, "unknown", "unavailable"):
+            return
+        # Prefer restored status string (OK / 502 / …)
+        self._attr_native_value = str(last.state)
+        if last.attributes:
+            self._last_detail = str(last.attributes.get("detail") or "")
+            err = last.attributes.get("last_error")
+            self._last_error = str(err) if err else None
+            raw = last.attributes.get("last_success")
+            if raw:
+                parsed = dt_util.parse_datetime(str(raw))
+                if parsed is not None:
+                    self._last_success = dt_util.as_local(parsed)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose time, range detail, and last error text."""
+        attrs: dict[str, Any] = {
+            "status": self._attr_native_value,
+        }
+        if self._last_success is not None:
+            local = dt_util.as_local(self._last_success)
+            attrs["last_success"] = local.isoformat()
+            attrs["short"] = local.strftime("%Y-%m-%d %H:%M")
+        if self._last_detail:
+            attrs["detail"] = self._last_detail
+        if self._last_error:
+            attrs["last_error"] = self._last_error
+        return attrs
+
+    def set_success(self, detail: str = "") -> None:
+        """Mark a successful API fetch: state OK + update last_success time."""
+        self._attr_native_value = "OK"
+        self._last_success = dt_util.now()
+        self._last_detail = detail
+        self._last_error = None
+        if self.hass is not None:
+            self.async_write_ha_state()
+
+    def set_error(
+        self,
+        detail: str = "",
+        *,
+        status: str | int | None = None,
+    ) -> None:
+        """Mark a failed API fetch; state becomes the status code or ``error``."""
+        if status is not None and str(status).strip():
+            self._attr_native_value = str(status).strip()
+        else:
+            self._attr_native_value = "error"
+        self._last_error = detail or str(self._attr_native_value)
+        self._last_detail = detail
+        # Keep last_success as previous OK time
         if self.hass is not None:
             self.async_write_ha_state()

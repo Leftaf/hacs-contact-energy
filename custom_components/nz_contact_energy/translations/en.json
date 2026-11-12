@@ -9,14 +9,16 @@
                     "password": "Password",
                     "first_day_history": "First day of historical import",
                     "delta_no_data_days": "Days to re-fetch (lag window)",
-                    "refresh_interval": "Default Refresh Interval (hours)"
+                    "refresh_interval": "Refresh interval (hours)",
+                    "refresh_start_time": "Refresh start time"
                 },
                 "data_description": {
                     "account_id": "The email address you use to log into the Contact Energy app / My Account",
                     "password": "Your Contact Energy account password",
                     "first_day_history": "The first day of historical data to import",
                     "delta_no_data_days": "On each update, re-request this many days before today (Contact data often lags). Default: 2.",
-                    "refresh_interval": "How often to poll Contact for new data (hours). Default: 24."
+                    "refresh_interval": "How often to poll Contact for new data (hours). Default: 24.",
+                    "refresh_start_time": "Local time of the first daily poll. Further polls are every refresh interval after this (e.g. 03:00 with 12h → 03:00 and 15:00). Default: 03:00."
                 }
             }
         },
@@ -34,10 +36,12 @@
                 "title": "NZ Contact Energy options",
                 "data": {
                     "refresh_interval": "Refresh interval (hours)",
+                    "refresh_start_time": "Refresh start time",
                     "delta_no_data_days": "Days to re-fetch (lag window)"
                 },
                 "data_description": {
-                    "refresh_interval": "As data are only provided once each night, this is the interval between updates. Default: 24 hours.",
+                    "refresh_interval": "Hours between Contact polls. Default: 24.",
+                    "refresh_start_time": "Local clock time for the first poll each day. Other runs are offset by the refresh interval. Default: 03:00.",
                     "delta_no_data_days": "On each update, re-request this many days before today (Contact data often lags)."
                 }
             }

@@ -35,12 +35,27 @@ class ContactEnergyApi:
         self._account_id = ""
         self._contract_id = ""
 
+    @property
+    def account_id(self) -> str:
+        """Contact account id after login."""
+        return self._account_id
+
+    @property
+    def contract_id(self) -> str:
+        """Contact contract id after login."""
+        return self._contract_id
+
+    @property
+    def has_session(self) -> bool:
+        """True when token and contract id are present."""
+        return bool(self._api_token and self._contract_id)
+
     # ------------------------------------------------------------------
     # Auth
     # ------------------------------------------------------------------
 
     def login(self) -> bool:
-        """Login, refresh session, and load account/contract. Returns True on success."""
+        """Log in, refresh session, and load account/contract."""
         headers = {"x-api-key": self._api_key}
         data = {"username": self._email, "password": self._password}
 
@@ -70,8 +85,7 @@ class ContactEnergyApi:
                         debug_file.absolute(),
                     )
                 except Exception:
-                    _LOGGER.exception(
-                        "Failed to write full login response to debug file")
+                    _LOGGER.exception("Failed to write full login response to debug file")
             _LOGGER.debug("Logged in successfully")
             return self.refresh_session()
 
@@ -166,7 +180,8 @@ class ContactEnergyApi:
                     )
                 except Exception:
                     _LOGGER.exception(
-                        "Failed to write full accounts response to debug file")
+                        "Failed to write full accounts response to debug file"
+                    )
 
             _LOGGER.debug("Retrieved accounts")
             return True
@@ -180,7 +195,12 @@ class ContactEnergyApi:
     # ------------------------------------------------------------------
 
     def get_usage(
-        self, year: int | str, month: int | str, day: int | str,
+        self,
+        year: int | str,
+        month: int | str,
+        day: int | str,
+        *,
+        _retried: bool = False,
     ) -> Any | None:
         """Fetch hourly usage for a single calendar day.
 
@@ -188,14 +208,16 @@ class ContactEnergyApi:
             list of hour dicts on success (may be empty),
             None on error / auth failure.
 
+        On 401/403 or 5xx, clears the session, logs in once, and retries
+        the same day (avoids stale-token failures after HA has been up a while).
         """
         year_s = str(year)
         month_s = str(month).zfill(2)
         day_s = str(day).zfill(2)
         date_label = f"{year_s}-{month_s}-{day_s}"
 
-        if not self._contract_id or not self._account_id:
-            _LOGGER.warning("Missing account or contract ID — attempting login")
+        if not self._contract_id or not self._account_id or not self._api_token:
+            _LOGGER.warning("Missing account/contract/token - attempting login")
             if not self.login():
                 return None
 
@@ -232,10 +254,11 @@ class ContactEnergyApi:
                     debug_file = Path(f"usage_debug_{date_label}.json")
                     debug_file.write_text(response.text, encoding="utf-8")
                     _LOGGER.debug(
-                        "Full usage response saved to file: %s", debug_file.absolute())
+                        "Full usage response saved to file: %s",
+                        debug_file.absolute(),
+                    )
                 except Exception:
-                    _LOGGER.exception(
-                        "Failed to write full usage response to debug file")
+                    _LOGGER.exception("Failed to write full usage response to debug file")
 
             if response.status_code == requests.codes.ok:
                 data = response.json()
@@ -246,9 +269,22 @@ class ContactEnergyApi:
                     )
                 return data
 
+            # Stale session or transient Contact error: one re-login + retry
+            if response.status_code in (401, 403, 502, 503, 504) and not _retried:
+                _LOGGER.warning(
+                    "Usage %s status %s - refreshing session and retrying once",
+                    date_label,
+                    response.status_code,
+                )
+                self._api_token = ""
+                self._api_session = ""
+                if not self.login():
+                    return None
+                return self.get_usage(year, month, day, _retried=True)
+
             if response.status_code in (401, 403):
                 _LOGGER.warning(
-                    "Unauthorized for %s (status %s) — resetting token",
+                    "Unauthorized for %s (status %s) after retry - resetting token",
                     date_label,
                     response.status_code,
                 )

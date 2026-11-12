@@ -18,10 +18,13 @@ from .const import (
     CONF_DELTA_NO_DATA_DAYS,
     CONF_FIRST_DAY_HISTORY,
     CONF_REFRESH_INTERVAL,
+    CONF_REFRESH_START_TIME,
     DEFAULT_DELTA_NO_DATA_DAYS,
     DEFAULT_REFRESH_INTERVAL,
+    DEFAULT_REFRESH_START_TIME,
     DOMAIN,
     default_first_day_history,
+    parse_refresh_start_time,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +45,10 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
             CONF_REFRESH_INTERVAL,
             default=DEFAULT_REFRESH_INTERVAL,
         ): cv.positive_int,
+        vol.Optional(
+            CONF_REFRESH_START_TIME,
+            default=DEFAULT_REFRESH_START_TIME,
+        ): cv.time,
     },
 )
 
@@ -70,7 +77,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None,
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Handle the initial step where the user enters credentials."""
         errors: dict[str, str] = {}
@@ -84,6 +92,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "cannot_connect"
             else:
+                # Store time as HH:MM:SS string for config entry JSON
+                start = parse_refresh_start_time(
+                    user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
+                )
+                user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
                 return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
@@ -105,14 +118,25 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for NZ Contact Energy."""
 
     async def async_step_init(
-        self, user_input: dict[str, Any] | None = None,
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
+            start = parse_refresh_start_time(
+                user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
+            )
+            user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
             return self.async_create_entry(title="", data=user_input)
 
         options = self.config_entry.options
         data = self.config_entry.data
+        default_start = parse_refresh_start_time(
+            options.get(
+                CONF_REFRESH_START_TIME,
+                data.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
+            ),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -122,8 +146,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_DELTA_NO_DATA_DAYS,
                         default=options.get(
                             CONF_DELTA_NO_DATA_DAYS,
-                            data.get(
-                                CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS),
+                            data.get(CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS),
                         ),
                     ): cv.positive_int,
                     vol.Optional(
@@ -133,6 +156,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
                         ),
                     ): cv.positive_int,
+                    vol.Optional(
+                        CONF_REFRESH_START_TIME,
+                        default=default_start,
+                    ): cv.time,
                 },
             ),
         )

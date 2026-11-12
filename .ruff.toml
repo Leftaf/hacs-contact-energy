@@ -24,6 +24,8 @@ ignore = [
   "G004",
   # HA uses assert in some tests; not relevant here
   "S101",
+  # Exculde copyright message
+  "CPY001",
 ]
 
 [lint.per-file-ignores]

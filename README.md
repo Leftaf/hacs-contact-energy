@@ -1,15 +1,19 @@
 # NZ Contact Energy – Home Assistant Integration
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/Leftaf/hacs-contact-energy)](https://github.com/Leftaf/hacs-contact-energy/releases)
+[![Marketplace](https://img.shields.io/badge/Home%20Assistant-Marketplace-blue.svg)](https://www.home-assistant.io/blog/2026/11/04/release-202611/)
 
-Custom HACS integration that pulls **hourly and daily electricity consumption** from your [Contact Energy](https://www.contact.co.nz) (New Zealand) account and feeds it into the Home Assistant Energy Dashboard.
+Custom integration for **New Zealand** that pulls **hourly electricity consumption** from your [Contact Energy](https://www.contact.co.nz) account and feeds it into the Home Assistant Energy Dashboard.
+
+Listed for country **NZ** in Marketplace / HACS metadata (`hacs.json` → `"country": "NZ"`).
 
 ---
 
 ## Features
 
-- **Energy Dashboard ready** – imports usage as external statistics so your consumption appears automatically in the Energy dashboard
+- **Energy Dashboard ready** – imports usage as **external statistics** and onto the **consumption entity** so Energy and Statistics graph cards both work
+- **Cost tracking** – hourly NZD cost from Contact’s `dollarValue`, exposed as a monetary total sensor for Energy cost tracking
+- **Last API success** – timestamp sensor on the device (useful for Activity / last successful fetch)
 - **Historical import** – on first setup, back-fills data from a configurable start date
 - **Lag-aware polling** – Contact data often arrives with a 1–2 day delay; the integration re-fetches a configurable window of recent days
 - **Repair service** – re-import any past date range when data is missing (portal offline, maintenance, failed poll, …)
@@ -20,23 +24,24 @@ Custom HACS integration that pulls **hourly and daily electricity consumption** 
 
 ## Installation
 
-### HACS (recommended)
+### Marketplace (Home Assistant 2026.11+, recommended)
 
-1. Open HACS → **Integrations**
-2. Click the three dots (⋮) in the top right → **Custom repositories**
-3. Add the repository URL and set category to **Integration**:
+1. Go to **Settings → Marketplace**
+2. Choose one of:
+   - **Search** for **NZ Contact Energy** (once the repository is in the default catalog), or
+   - **Add from link** and enter:
 
-   ```
-   https://github.com/Leftaf/hacs-contact-energy
-   ```
+     ```
+     https://github.com/Leftaf/hacs-contact-energy
+     ```
+3. Install the integration
+4. Restart Home Assistant if prompted (updates still require a restart)
 
-4. Click **Add**
-5. Search for **NZ Contact Energy** and download it
-6. Restart Home Assistant
+**One-click Marketplace link:**
 
-**One-click HACS link:**
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=Leftaf&repository=hacs-contact-energy&category=integration)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Leftaf&repository=hacs-contact-energy&category=integration)
+The older [HACS repository link](https://my.home-assistant.io/redirect/hacs_repository/?owner=Leftaf&repository=hacs-contact-energy&category=integration) still works on HA 2026.11+ (it opens Marketplace) and on older versions that still use HACS.
 
 ### Manual
 
@@ -58,8 +63,9 @@ Custom HACS integration that pulls **hourly and daily electricity consumption** 
    | **First day of historical import** | Earliest date to pull (YYYY-MM-DD) | First day of the month, 2 months ago |
    | **Days to re-fetch (lag window)** | How many recent days to re-request on each update | `2` |
    | **Refresh Interval (hours)** | How often to poll the API | `24` |
+| **Refresh start time** | Local time for the first daily poll | `03:00:00` |
 
-After setup you can change the lag window and refresh interval via the integration’s **Configure** options.
+After setup you can change the lag window, refresh interval, and **refresh start time** via the integration’s **Configure** options.
 
 ---
 
@@ -67,14 +73,31 @@ After setup you can change the lag window and refresh interval via the integrati
 
 | Name | Type | Description |
 |------|------|-------------|
-| `sensor.nz_contact_energy_consumption` | Sensor (Energy / Total Increasing) | Running total consumption (kWh) |
-| `sensor.nz_contact_energy_cost` | Sensor (Monetary / Total, NZD) | Running total cost **(excl. GST)** from hourly `dollarValue` |
-| External statistics | `nz_contact_energy:energy_consumption` | Hourly statistics for the Energy Dashboard |
+| Consumption sensor | Energy / Total Increasing (kWh) | Running total; entity id may include your device name |
+| Cost sensor | Monetary / Total (NZD, **excl. GST**) | Running total from hourly `dollarValue` |
+| Last API success | Timestamp | Time of last successful Contact fetch (optional to hide) |
+| External statistics | `nz_contact_energy:energy_consumption` | Hourly kWh (external) |
 | External statistics | `nz_contact_energy:free_energy_consumption` | Free / controlled-period energy (when available) |
+| Entity LTS | Same hours on the consumption & cost **entities** | Used when Energy / Statistics graph select the sensor |
+
+Pick **either** the consumption **entity** **or** the external statistic as the Energy grid source — not both (would double-count).
 
 The integration uses Contact’s unofficial API. Data is typically available with a 1–2 day lag.
 
----
+### Upgrading to 1.1.0+
+
+From 1.1.0, each successful import writes hourly kWh to the **entity** as well as external statistics. After upgrading:
+
+1. Restart Home Assistant and check the device shows **1.1.0**.
+2. Re-import history once if Statistics graph / Energy shows missing kWh on the sensor:
+
+```yaml
+action: nz_contact_energy.import_usage
+data:
+  start_date: "YYYY-MM-DD"   # your first_day_history
+```
+
+New lag-window polls then keep entity statistics updated automatically.
 
 ### Cost tracking (Energy dashboard)
 
@@ -111,7 +134,7 @@ Use the built-in **import_usage** service to re-fetch and rewrite any past range
 
 ### How to call it
 
-**Tools → Actions**
+**Developer Tools → Actions**
 
 ```yaml
 action: nz_contact_energy.import_usage
@@ -178,12 +201,12 @@ Re-importing the same range is safe — existing statistics for those hours are 
 
 - Requires a valid Contact Energy account (email + password)
 - Uses an unofficial API – Contact may change or rate-limit it at any time
-- Cost is imported from hourly `dollarValue` (NZD, excl. GST) via sensor.`nz_contact_energy_cost`
-- The cost are stored per-hour for time-of-use tariffs (peak / off-peak / night)
-- Free / controlled-period energy (if present on your plan) is recorded separately when available add `Free NZ Contact Energy Consumption` to the **Grid connections**
+- **Multiple contracts on one account are not tested.** The integration uses the first account and prefers a contract with `status: ACTIVE` (otherwise the first contract). If you have several active contracts (e.g. electricity + gas), behaviour is untested — please report samples via GitHub Issues
+- Cost is imported from hourly `dollarValue` (NZD, **excl. GST**) via `sensor.nz_contact_energy_cost`
+- Per-hour cost storage is ready for time-of-use tariffs (peak / off-peak / night)
+- Free / controlled-period energy (if present on your plan) is recorded separately when available
 - Contact data often lags by 1–2 days; the lag window setting covers normal delays
 - Long date ranges are fetched day-by-day with a short pause to avoid rate limiting
-- Multiple contracts on one account are not tested. The integration uses the first countract with status: ACTIVE (otherwise the first contract). If you have several active contracts (e.g. electricity + gas), behaviour is untested — please report samples via GitHub Issues
 
 ---
 

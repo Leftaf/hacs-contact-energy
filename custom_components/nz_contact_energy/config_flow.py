@@ -11,6 +11,7 @@ from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.selector import TimeSelector
 
 from .api import ContactEnergyApi
 from .const import (
@@ -28,6 +29,10 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# TimeSelector serializes for the UI; cv.time does not (HA 2026.11+ error).
+_DEFAULT_START_STR = DEFAULT_REFRESH_START_TIME.isoformat(timespec="seconds")
+
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -47,8 +52,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ): cv.positive_int,
         vol.Optional(
             CONF_REFRESH_START_TIME,
-            default=DEFAULT_REFRESH_START_TIME,
-        ): cv.time,
+            default=_DEFAULT_START_STR,
+        ): TimeSelector(),
     },
 )
 
@@ -92,9 +97,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "cannot_connect"
             else:
-                # Store time as HH:MM:SS string for config entry JSON
                 start = parse_refresh_start_time(
-                    user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
+                    user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
                 )
                 user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
                 return self.async_create_entry(title=info["title"], data=user_input)
@@ -135,7 +139,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             options.get(
                 CONF_REFRESH_START_TIME,
                 data.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
-            ),
+            )
         )
 
         return self.async_show_form(
@@ -158,8 +162,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     ): cv.positive_int,
                     vol.Optional(
                         CONF_REFRESH_START_TIME,
-                        default=default_start,
-                    ): cv.time,
+                        default=default_start.isoformat(timespec="seconds"),
+                    ): TimeSelector(),
                 },
             ),
         )

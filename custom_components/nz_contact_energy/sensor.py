@@ -546,7 +546,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         free_kwh_statistics: list[StatisticData],
         cost_statistics: list[StatisticData] | None = None,
     ) -> None:
-        """Avoid duplicate hours (last wins) so the recorder doesn't throw UNIQUE constraint errors.
+        """Avoid duplicate hours so the recorder doesn't throw UNIQUE constraint errors.
 
         kwh_statistics = self._dedupe_statistics(kwh_statistics or [])
         free_kwh_statistics = self._dedupe_statistics(free_kwh_statistics or [])
@@ -647,7 +647,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is not None:
             self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, "history_imported": True}
+                entry, data={**entry.data, "history_imported": True},
             )
         _LOGGER.info("Historical import marked complete for %s", self._entry_id)
 
@@ -673,7 +673,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         if kwh_statistics is None:
             _LOGGER.error(
                 "Historical import aborted (login or API error). "
-                "Will retry on next restart or via import_usage."
+                "Will retry on next restart or via import_usage.",
             )
             return
 
@@ -707,7 +707,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         * **Before:** running sum is seeded from the last hour prior to
           ``start_date``.
         * **After:** days after ``end`` are shifted by a constant offset
-          (new end-of-range sum − old end-of-range sum) so hourly deltas on
+          (new end-of-range sum - old end-of-range sum) so hourly deltas on
           later days stay the same but align with the rewritten range.
           This is more reliable than rebuilding later days from deltas.
 
@@ -716,7 +716,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         if end_date is None:
             end = start_date
             _LOGGER.info(
-                "No end_date given – importing single day %s, "
+                "No end_date given - importing single day %s, "
                 "then shifting later days to match the new sum",
                 start_date,
             )
@@ -748,7 +748,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         * **Before:** seed from the last hour prior to ``start_date``.
         * **After:** shift all later hours through yesterday by
-          (new_end_sum − old_end_sum) so the day after the range stays continuous.
+          (new_end_sum - old_end_sum) so the day after the range stays continuous.
 
         Missing hours are not invented — only existing points are rewritten.
         """
@@ -826,7 +826,7 @@ class ContactEnergyUsageSensor(SensorEntity):
                     offset,
                 )
                 await self._async_shift_sums_after(
-                    statistic_id, end_date, yesterday, offset
+                    statistic_id, end_date, yesterday, offset,
                 )
 
         # Keep live cost sensor total aligned with hour map + stats
@@ -834,7 +834,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         cost_by_hour = store.get("cost_by_hour") or {}
         if cost_by_hour and self._cost_sensor is not None:
             self._cost_sensor.set_total(
-                round(sum(float(v) for v in cost_by_hour.values()), 2)
+                round(sum(float(v) for v in cost_by_hour.values()), 2),
             )
 
         self.async_write_ha_state()
@@ -1033,7 +1033,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         # Use *in-memory* end sums from this fetch — not a recorder re-read.
         # Reading the DB immediately after async_add_external_statistics can
         # still return the *old* end sum, so cost_offset becomes 0 and later
-        # days (e.g. June after a Mar–May import) stay unshifted → large
+        # days (e.g. June after a Mar - May import) stay unshifted → large
         # negative Energy day totals.
         new_kwh_end = (
             self._statistic_sum(kwh_statistics[-1]) if kwh_statistics else old_kwh_end
@@ -1298,7 +1298,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         if not stats or statistic_id not in stats or not stats[statistic_id]:
             _LOGGER.info(
-                "No statistics after %s to shift for %s", after_day, statistic_id
+                "No statistics after %s to shift for %s", after_day, statistic_id,
             )
             return
 
@@ -1395,7 +1395,7 @@ class ContactEnergyCostSensor(SensorEntity):
         cost_by_hour = store.get("cost_by_hour") or {}
         if cost_by_hour:
             self._attr_native_value = round(
-                sum(float(v) for v in cost_by_hour.values()), 2
+                sum(float(v) for v in cost_by_hour.values()), 2,
             )
 
     def set_total(self, total: float) -> None:

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 
@@ -204,8 +204,7 @@ class ContactEnergyUsageSensor(SensorEntity):
             self._last_api_sensor.set_success(detail)
 
     def _notify_api_error(
-        self, detail: str = "", status: str | int | None = None,
-    ) -> None:
+        self, detail: str = "", status: str | int | None = None) -> None:
         """Record failed Contact API activity (status OK/code in entity state)."""
         if self._last_api_sensor is not None:
             self._last_api_sensor.set_error(detail, status=status)
@@ -507,13 +506,54 @@ class ContactEnergyUsageSensor(SensorEntity):
     # Write statistics
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _dedupe_statistics(
+        stats: list[StatisticData],
+    ) -> list[StatisticData]:
+        """One row per hour start (last wins). Avoids UNIQUE on metadata_id,start_ts."""
+        if not stats:
+            return stats
+        by_hour: dict[datetime, StatisticData] = {}
+        for point in stats:
+            if isinstance(point, dict):
+                start = point.get("start")
+                sum_v = point.get("sum")
+            else:
+                start = getattr(point, "start", None)
+                sum_v = getattr(point, "sum", None)
+            if start is None:
+                continue
+            if isinstance(start, (int, float)):
+                start = datetime.fromtimestamp(start, tz=UTC)
+            elif isinstance(start, str):
+                try:
+                    start = datetime.fromisoformat(start)
+                except ValueError:
+                    continue
+            if not isinstance(start, datetime):
+                continue
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=UTC)
+            else:
+                start = start.astimezone(UTC)
+            hour = start.replace(minute=0, second=0, microsecond=0)
+            by_hour[hour] = StatisticData(start=hour, sum=float(sum_v or 0.0))
+        return [by_hour[k] for k in sorted(by_hour)]
+
     def _write_statistics(
         self,
         kwh_statistics: list[StatisticData],
         free_kwh_statistics: list[StatisticData],
         cost_statistics: list[StatisticData] | None = None,
     ) -> None:
-        """Push external statistics into the recorder (energy + cost)."""
+        """Avoid duplicate hours (last wins) so the recorder doesn't throw UNIQUE constraint errors.
+
+        kwh_statistics = self._dedupe_statistics(kwh_statistics or [])
+        free_kwh_statistics = self._dedupe_statistics(free_kwh_statistics or [])
+        cost_statistics = self._dedupe_statistics(cost_statistics or [])
+
+        Push external statistics into the recorder (energy + cost).
+        """
         if kwh_statistics:
             metadata: StatisticMetaData = {
                 "has_sum": True,
@@ -607,7 +647,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is not None:
             self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, "history_imported": True},
+                entry, data={**entry.data, "history_imported": True}
             )
         _LOGGER.info("Historical import marked complete for %s", self._entry_id)
 
@@ -633,7 +673,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         if kwh_statistics is None:
             _LOGGER.error(
                 "Historical import aborted (login or API error). "
-                "Will retry on next restart or via import_usage.",
+                "Will retry on next restart or via import_usage."
             )
             return
 
@@ -786,7 +826,7 @@ class ContactEnergyUsageSensor(SensorEntity):
                     offset,
                 )
                 await self._async_shift_sums_after(
-                    statistic_id, end_date, yesterday, offset,
+                    statistic_id, end_date, yesterday, offset
                 )
 
         # Keep live cost sensor total aligned with hour map + stats
@@ -794,7 +834,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         cost_by_hour = store.get("cost_by_hour") or {}
         if cost_by_hour and self._cost_sensor is not None:
             self._cost_sensor.set_total(
-                round(sum(float(v) for v in cost_by_hour.values()), 2),
+                round(sum(float(v) for v in cost_by_hour.values()), 2)
             )
 
         self.async_write_ha_state()
@@ -993,7 +1033,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         # Use *in-memory* end sums from this fetch — not a recorder re-read.
         # Reading the DB immediately after async_add_external_statistics can
         # still return the *old* end sum, so cost_offset becomes 0 and later
-        # days (e.g. June after a Mar - May import) stay unshifted → large
+        # days (e.g. June after a Mar–May import) stay unshifted → large
         # negative Energy day totals.
         new_kwh_end = (
             self._statistic_sum(kwh_statistics[-1]) if kwh_statistics else old_kwh_end

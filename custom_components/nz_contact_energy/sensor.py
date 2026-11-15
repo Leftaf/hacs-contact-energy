@@ -176,6 +176,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         self._refresh_start_time = parse_refresh_start_time(refresh_start_time)
         self._entry_id = entry_id
         self._import_task = None
+        self._refresh_task = None
         self._unsub_interval = None
         self._cost_sensor: ContactEnergyCostSensor | None = None
         self._last_api_sensor: ContactEnergyLastApiSensor | None = None
@@ -281,7 +282,10 @@ class ContactEnergyUsageSensor(SensorEntity):
                 self._async_import_history()
             )
         else:
-            self.hass.async_create_task(self.async_update_ha_state(force_refresh=True))
+            # Do not call async_update_ha_state(force_refresh=True): the lag-window
+            # Contact fetch (login + ~1.5s sleep per day) often exceeds HA's 10s
+            # entity-update warning. Run it as a background task instead.
+            self._schedule_lag_window_refresh()
 
         # Poll at refresh_start_time local, then every refresh_interval hours.
         # Example: 03:00 + 24h → 03:00 only; 03:00 + 12h → 03:00 and 15:00.
@@ -327,7 +331,7 @@ class ContactEnergyUsageSensor(SensorEntity):
     async def _async_interval_update(self, _now=None) -> None:
         """Clock callback (refresh_start_time + interval) — real data fetch."""
         _LOGGER.debug("Scheduled Contact refresh fired")
-        await self.async_update_ha_state(force_refresh=True)
+        self._schedule_lag_window_refresh()
 
     async def async_will_remove_from_hass(self) -> None:
         """Clean up timers and API session."""
@@ -338,6 +342,10 @@ class ContactEnergyUsageSensor(SensorEntity):
         if self._import_task is not None and not self._import_task.done():
             self._import_task.cancel()
             self._import_task = None
+
+        if self._refresh_task is not None and not self._refresh_task.done():
+            self._refresh_task.cancel()
+            self._refresh_task = None
 
         if hasattr(self._api, "close"):
             self._api.close()  # pyright: ignore[reportAttributeAccessIssue]
@@ -553,7 +561,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         free_kwh_statistics: list[StatisticData],
         cost_statistics: list[StatisticData] | None = None,
     ) -> None:
-        """Avoid duplicate hours and push external statistics into the recorder.
+        """Avoid duplicates and write external statistics into the recorder.
 
         kwh_statistics = self._dedupe_statistics(kwh_statistics or [])
         free_kwh_statistics = self._dedupe_statistics(free_kwh_statistics or [])
@@ -962,21 +970,38 @@ class ContactEnergyUsageSensor(SensorEntity):
     # Normal periodic update
     # ------------------------------------------------------------------
 
-    async def async_update(self) -> None:
-        """Short update: lag window only.
+    def _schedule_lag_window_refresh(self) -> None:
+        """Start a background lag-window fetch if one is not already running."""
+        if self._refresh_task is not None and not self._refresh_task.done():
+            _LOGGER.debug("Lag-window refresh already running — skip")
+            return
+        self._refresh_task = self.hass.async_create_task(
+            self._async_lag_window_refresh(),
+            name=f"{DOMAIN}_lag_window_refresh",
+        )
 
-        Seeds from the day before the window; after writing, shifts any days
-        after the window (normally none, because the window ends yesterday).
-        Aborts with no write on API error.
-        """
+    async def _async_lag_window_refresh(self) -> None:
+        """Fetch Contact lag window off the entity update path (avoids 10s warning)."""
         store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
-
         if not store.get("history_imported"):
             _LOGGER.debug("Skipping poll; historical import still pending/running")
             return
-
         start, end = self._date_range(full_history=False)
+        _LOGGER.debug("Background lag-window refresh %s → %s", start, end)
         await self._async_fetch_write_and_shift(start, end)
+
+    async def async_update(self) -> None:
+        """Entity update entrypoint — must stay fast.
+
+        Contact fetches (login + multi-day API + rate-limit sleeps) routinely
+        take well over 10 seconds. Schedule that work in the background so HA
+        does not log "Update of sensor … is taking over 10 seconds".
+        """
+        store = self.hass.data.setdefault(DOMAIN, {}).setdefault(self._entry_id, {})
+        if not store.get("history_imported"):
+            _LOGGER.debug("Skipping poll; historical import still pending/running")
+            return
+        self._schedule_lag_window_refresh()
 
     # ------------------------------------------------------------------
     # Seed helper

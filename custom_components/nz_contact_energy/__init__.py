@@ -37,6 +37,7 @@ SERVICE_RECALCULATE_SCHEMA = vol.Schema(
     },
 )
 
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up NZ Contact Energy from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -57,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             end: date | None = call.data.get("end_date")
 
             # Use the first (usually only) configured entry
-            for entry_id, store in hass.data.get(DOMAIN, {}).items():
+            for _entry_id, store in hass.data.get(DOMAIN, {}).values():
                 sensor = store.get("sensor")
                 if sensor is not None:
                     await sensor.async_import_date_range(start, end)
@@ -71,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             end: date | None = call.data.get("end_date")
 
             # Use the first (usually only) configured entry
-            for _entry_id, store in hass.data.get(DOMAIN, {}).items():
+            for _entry_id, store in hass.data.get(DOMAIN, {}).values():
                 sensor = store.get("sensor")
                 if sensor is not None:
                     await sensor.async_recalculate_sums(start, end)

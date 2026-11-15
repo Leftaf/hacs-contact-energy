@@ -180,7 +180,7 @@ class ContactEnergyApi:
                     )
                 except Exception:
                     _LOGGER.exception(
-                        "Failed to write full accounts response to debug file"
+                        "Failed to write full accounts response to debug file",
                     )
 
             _LOGGER.debug("Retrieved accounts")
@@ -210,6 +210,7 @@ class ContactEnergyApi:
 
         On 401/403 or 5xx, clears the session, logs in once, and retries
         the same day (avoids stale-token failures after HA has been up a while).
+
         """
         year_s = str(year)
         month_s = str(month).zfill(2)

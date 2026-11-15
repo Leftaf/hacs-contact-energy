@@ -98,7 +98,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             else:
                 start = parse_refresh_start_time(
-                    user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
+                    user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
                 )
                 user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
                 return self.async_create_entry(title=info["title"], data=user_input)
@@ -128,7 +128,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Manage the options."""
         if user_input is not None:
             start = parse_refresh_start_time(
-                user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
+                user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
             )
             user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
             return self.async_create_entry(title="", data=user_input)
@@ -139,7 +139,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             options.get(
                 CONF_REFRESH_START_TIME,
                 data.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
-            )
+            ),
         )
 
         return self.async_show_form(

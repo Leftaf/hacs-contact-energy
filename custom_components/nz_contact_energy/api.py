@@ -85,7 +85,9 @@ class ContactEnergyApi:
                         debug_file.absolute(),
                     )
                 except Exception:
-                    _LOGGER.exception("Failed to write full login response to debug file")
+                    _LOGGER.exception(
+                        "Failed to write full login response to debug file"
+                    )
             _LOGGER.debug("Logged in successfully")
             return self.refresh_session()
 
@@ -259,7 +261,9 @@ class ContactEnergyApi:
                         debug_file.absolute(),
                     )
                 except Exception:
-                    _LOGGER.exception("Failed to write full usage response to debug file")
+                    _LOGGER.exception(
+                        "Failed to write full usage response to debug file"
+                    )
 
             if response.status_code == requests.codes.ok:
                 data = response.json()

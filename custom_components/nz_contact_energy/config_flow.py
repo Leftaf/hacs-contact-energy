@@ -100,7 +100,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 start = parse_refresh_start_time(
                     user_input.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
                 )
-                user_input[CONF_REFRESH_START_TIME] = start.isoformat(timespec="seconds")
+                user_input[CONF_REFRESH_START_TIME] = start.isoformat(
+                    timespec="seconds"
+                )
                 return self.async_create_entry(title=info["title"], data=user_input)
 
         return self.async_show_form(
@@ -150,14 +152,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_DELTA_NO_DATA_DAYS,
                         default=options.get(
                             CONF_DELTA_NO_DATA_DAYS,
-                            data.get(CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS),
+                            data.get(
+                                CONF_DELTA_NO_DATA_DAYS,
+                                DEFAULT_DELTA_NO_DATA_DAYS
+                            ),
                         ),
                     ): cv.positive_int,
                     vol.Optional(
                         CONF_REFRESH_INTERVAL,
                         default=options.get(
                             CONF_REFRESH_INTERVAL,
-                            data.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
+                            data.get(
+                                CONF_REFRESH_INTERVAL,
+                                DEFAULT_REFRESH_INTERVAL
+                            ),
                         ),
                     ): cv.positive_int,
                     vol.Optional(

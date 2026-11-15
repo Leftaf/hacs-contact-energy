@@ -123,13 +123,15 @@ async def async_setup_entry(
 
     usage = ContactEnergyUsageSensor(
         api=api,
-        first_day_history=config.get(CONF_FIRST_DAY_HISTORY, default_first_day_history()),
+        first_day_history=config.get(
+            CONF_FIRST_DAY_HISTORY, default_first_day_history()
+        ),
         delta_no_data_days=config.get(
-            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS,
+            CONF_DELTA_NO_DATA_DAYS, DEFAULT_DELTA_NO_DATA_DAYS
         ),
         refresh_hours=config.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL),
         refresh_start_time=parse_refresh_start_time(
-            config.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME),
+            config.get(CONF_REFRESH_START_TIME, DEFAULT_REFRESH_START_TIME)
         ),
         entry_id=entry.entry_id,
     )
@@ -204,7 +206,8 @@ class ContactEnergyUsageSensor(SensorEntity):
             self._last_api_sensor.set_success(detail)
 
     def _notify_api_error(
-        self, detail: str = "", status: str | int | None = None) -> None:
+        self, detail: str = "", status: str | int | None = None
+    ) -> None:
         """Record failed Contact API activity (status OK/code in entity state)."""
         if self._last_api_sensor is not None:
             self._last_api_sensor.set_error(detail, status=status)
@@ -223,7 +226,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         if not cost_by_hour and store.get("cost_by_day"):
             _LOGGER.info(
                 "Migrating cost storage from per-day to per-hour "
-                "(legacy day totals discarded; re-import history to rebuild)",
+                "(legacy day totals discarded; re-import history to rebuild)"
             )
             store.pop("cost_by_day", None)
 
@@ -255,7 +258,9 @@ class ContactEnergyUsageSensor(SensorEntity):
             "first_day_history": self._first_day_history,
             "delta_no_data_days": self._delta_no_data_days,
             "refresh_interval_hours": self._refresh_hours,
-            "refresh_start_time": self._refresh_start_time.isoformat(timespec="seconds"),
+            "refresh_start_time": self._refresh_start_time.isoformat(
+                timespec="seconds"
+            ),
             "refresh_at_local_hours": self._refresh_hours_of_day(),
         }
 
@@ -272,7 +277,9 @@ class ContactEnergyUsageSensor(SensorEntity):
                 "Scheduling background historical import from %s",
                 self._first_day_history,
             )
-            self._import_task = self.hass.async_create_task(self._async_import_history())
+            self._import_task = self.hass.async_create_task(
+                self._async_import_history()
+            )
         else:
             self.hass.async_create_task(self.async_update_ha_state(force_refresh=True))
 
@@ -282,7 +289,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         minute = self._refresh_start_time.minute
         second = self._refresh_start_time.second
         _LOGGER.info(
-            "Scheduling Contact lag-window refresh at local %s (hours=%s, interval=%sh)",
+            "Scheduling Contact lag-window at local %s (hours=%s, interval=%sh)",
             self._refresh_start_time.isoformat(timespec="seconds"),
             hours,
             self._refresh_hours,
@@ -546,7 +553,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         free_kwh_statistics: list[StatisticData],
         cost_statistics: list[StatisticData] | None = None,
     ) -> None:
-        """Avoid duplicate hours so the recorder doesn't throw UNIQUE constraint errors.
+        """Avoid duplicate hours and push external statistics into the recorder.
 
         kwh_statistics = self._dedupe_statistics(kwh_statistics or [])
         free_kwh_statistics = self._dedupe_statistics(free_kwh_statistics or [])
@@ -647,7 +654,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is not None:
             self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, "history_imported": True},
+                entry, data={**entry.data, "history_imported": True}
             )
         _LOGGER.info("Historical import marked complete for %s", self._entry_id)
 
@@ -673,7 +680,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         if kwh_statistics is None:
             _LOGGER.error(
                 "Historical import aborted (login or API error). "
-                "Will retry on next restart or via import_usage.",
+                "Will retry on next restart or via import_usage."
             )
             return
 
@@ -826,7 +833,7 @@ class ContactEnergyUsageSensor(SensorEntity):
                     offset,
                 )
                 await self._async_shift_sums_after(
-                    statistic_id, end_date, yesterday, offset,
+                    statistic_id, end_date, yesterday, offset
                 )
 
         # Keep live cost sensor total aligned with hour map + stats
@@ -834,7 +841,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         cost_by_hour = store.get("cost_by_hour") or {}
         if cost_by_hour and self._cost_sensor is not None:
             self._cost_sensor.set_total(
-                round(sum(float(v) for v in cost_by_hour.values()), 2),
+                round(sum(float(v) for v in cost_by_hour.values()), 2)
             )
 
         self.async_write_ha_state()
@@ -848,7 +855,8 @@ class ContactEnergyUsageSensor(SensorEntity):
     ) -> list[StatisticData]:
         """Load stats in range, rebuild continuous sum from deltas."""
         if statistic_id == COST_STATISTIC_ID or (
-            self._cost_sensor is not None and statistic_id == self._cost_sensor.entity_id
+            self._cost_sensor is not None
+            and statistic_id == self._cost_sensor.entity_id
         ):
             seed = await self._async_get_cost_seed(start_date)
         else:
@@ -1044,7 +1052,9 @@ class ContactEnergyUsageSensor(SensorEntity):
             else old_free_end
         )
         new_cost_end = (
-            self._statistic_sum(cost_statistics[-1]) if cost_statistics else old_cost_end
+            self._statistic_sum(cost_statistics[-1])
+            if cost_statistics
+            else old_cost_end
         )
         kwh_offset = new_kwh_end - old_kwh_end
         free_offset = new_free_end - old_free_end
@@ -1131,7 +1141,7 @@ class ContactEnergyUsageSensor(SensorEntity):
         return None
 
     def _cost_seed_from_hour_map(self, before: date) -> float:
-        """Sum of persisted per-hour costs strictly before local midnight of *before*."""
+        """Sum of persisted per-hour costs strictly before local midnight."""
         store = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         cost_by_hour = store.get("cost_by_hour") or {}
         if not cost_by_hour:
@@ -1298,7 +1308,7 @@ class ContactEnergyUsageSensor(SensorEntity):
 
         if not stats or statistic_id not in stats or not stats[statistic_id]:
             _LOGGER.info(
-                "No statistics after %s to shift for %s", after_day, statistic_id,
+                "No statistics after %s to shift for %s", after_day, statistic_id
             )
             return
 
@@ -1318,7 +1328,8 @@ class ContactEnergyUsageSensor(SensorEntity):
         elif statistic_id == COST_STATISTIC_ID:
             self._write_statistics([], [], shifted)
         elif (
-            self._cost_sensor is not None and statistic_id == self._cost_sensor.entity_id
+            self._cost_sensor is not None
+            and statistic_id == self._cost_sensor.entity_id
         ):
             # Entity-owned cost statistics (Energy "total costs" source)
             if async_import_statistics is not None:
@@ -1395,7 +1406,7 @@ class ContactEnergyCostSensor(SensorEntity):
         cost_by_hour = store.get("cost_by_hour") or {}
         if cost_by_hour:
             self._attr_native_value = round(
-                sum(float(v) for v in cost_by_hour.values()), 2,
+                sum(float(v) for v in cost_by_hour.values()), 2
             )
 
     def set_total(self, total: float) -> None:
